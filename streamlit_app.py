@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+import os
+import urllib.request
 
 st.set_page_config(page_title="Trend Momentum 4", page_icon="📈", layout="wide")
 
@@ -39,8 +43,7 @@ def atr(df, period=14):
     ], axis=1).max(axis=1)
     return tr.rolling(period).mean()
 
-@st.cache_data(ttl=900, show_spinner=False)
-def get_history(ticker, period="2y", interval="1d"):
+def fetch_history(ticker, period="2y", interval="1d"):
     x = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
     if x.empty:
         return pd.DataFrame()
@@ -49,6 +52,10 @@ def get_history(ticker, period="2y", interval="1d"):
     x = x.rename(columns=str.title)
     needed = ["Open","High","Low","Close","Volume"]
     return x[[c for c in needed if c in x.columns]].dropna()
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_history(ticker, period="2y", interval="1d"):
+    return fetch_history(ticker, period=period, interval=interval)
 
 def weekly_filter(df):
     if len(df) < 70:
@@ -129,7 +136,15 @@ def signal_for(ticker, df, capital, risk_pct, min_relvol, rsi_threshold):
         "Signal": "BUY" if score >= 80 else "WATCH"
     }
 
-NIFTY50 = [
+NSE_INDEX_URLS = {
+    "Nifty 50": "https://archives.nseindia.com/content/indices/ind_nifty50list.csv",
+    "Nifty Next 50": "https://archives.nseindia.com/content/indices/ind_niftynext50list.csv",
+    "Nifty Midcap 100": "https://archives.nseindia.com/content/indices/ind_niftymidcap100list.csv",
+    "Nifty Midcap 150": "https://archives.nseindia.com/content/indices/ind_niftymidcap150list.csv",
+    "Nifty 500": "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+}
+
+NIFTY50_FALLBACK = [
 "RELIANCE.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS","TCS.NS","BHARTIARTL.NS",
 "ITC.NS","SBIN.NS","LT.NS","AXISBANK.NS","KOTAKBANK.NS","M&M.NS","BAJFINANCE.NS",
 "MARUTI.NS","HINDUNILVR.NS","SUNPHARMA.NS","HCLTECH.NS","TITAN.NS","NTPC.NS",
@@ -139,6 +154,44 @@ NIFTY50 = [
 "EICHERMOT.NS","HEROMOTOCO.NS","HINDALCO.NS","TATACONSUM.NS","BRITANNIA.NS","APOLLOHOSP.NS",
 "SHRIRAMFIN.NS","BAJAJ-AUTO.NS","TATAMOTORS.NS","JIOFIN.NS","MAXHEALTH.NS"
 ]
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_universe_tickers(universe_name):
+    # 1. Fetch live index constituent CSV from NSE archives
+    if universe_name in NSE_INDEX_URLS:
+        try:
+            url = NSE_INDEX_URLS[universe_name]
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                df = pd.read_csv(resp)
+                if "Symbol" in df.columns:
+                    symbols = [f"{s.strip().upper()}.NS" for s in df["Symbol"].dropna().unique() if s.strip()]
+                    if len(symbols) >= 20:
+                        return symbols
+        except Exception:
+            pass
+
+    # 2. Check bundled local universes cache
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    local_path = os.path.join(base_dir, "data", "universes.json")
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if universe_name in data and len(data[universe_name]) > 0:
+                    return data[universe_name]
+        except Exception:
+            pass
+
+    # 3. Built-in hardcoded fallback
+    return NIFTY50_FALLBACK
+
+def scan_single_stock(ticker, capital, risk_pct, min_relvol, rsi_threshold):
+    try:
+        df = fetch_history(ticker, "2y", "1d")
+        return signal_for(ticker, df, capital, risk_pct, min_relvol, rsi_threshold)
+    except Exception:
+        return None
 
 def backtest(df, initial_capital, risk_pct, commission_bps, slippage_bps):
     if df.empty:
@@ -228,34 +281,89 @@ with st.sidebar:
 tabs = st.tabs(["📊 Scanner", "🧪 Backtest", "🧮 Trade Planner", "📘 Rules"])
 
 with tabs[0]:
-    st.subheader("Nifty 50 Momentum Scanner")
-    if st.button("🔄 Run scanner", type="primary"):
+    st.subheader("Momentum Scanner")
+
+    u_col1, u_col2 = st.columns([2, 1])
+    with u_col1:
+        universe_choice = st.selectbox(
+            "Select Universe / Index",
+            ["Nifty 50", "Nifty Next 50", "Nifty Midcap 100", "Nifty Midcap 150", "Nifty 500", "Custom Watchlist"],
+            index=0,
+            help="Choose an index to scan. For example, UNIONBANK.NS is in Nifty Next 50 and Nifty 500."
+        )
+
+    if universe_choice == "Custom Watchlist":
+        custom_input = st.text_area(
+            "Enter NSE symbols (comma or space separated)",
+            value="UNIONBANK.NS, TATAPOWER.NS, SBIN.NS, IRFC.NS, BEL.NS",
+            help="You can enter tickers with or without .NS (e.g. UNIONBANK, TCS)"
+        )
+        raw_symbols = [s.strip().upper() for s in custom_input.replace("\n", ",").split(",") if s.strip()]
+        target_tickers = [s if (s.endswith(".NS") or s.endswith(".BO")) else f"{s}.NS" for s in raw_symbols]
+    else:
+        target_tickers = get_universe_tickers(universe_choice)
+
+    with u_col2:
+        st.metric("Universe Size", f"{len(target_tickers)} stocks")
+
+    scan_btn_label = f"🔄 Run scanner on {universe_choice}"
+    if st.button(scan_btn_label, type="primary"):
         rows = []
         progress = st.progress(0)
-        for i, ticker in enumerate(NIFTY50):
-            try:
-                df = get_history(ticker, "2y", "1d")
-                result = signal_for(ticker, df, capital, risk_pct, min_relvol, rsi_threshold)
-                if result:
-                    rows.append(result)
-            except Exception:
-                pass
-            progress.progress((i+1)/len(NIFTY50))
+        status_text = st.empty()
+        total = len(target_tickers)
+        completed = 0
+
+        # Run concurrent downloads and scans across worker pool
+        max_workers = min(15, max(4, len(target_tickers) // 10))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_ticker = {
+                executor.submit(scan_single_stock, ticker, capital, risk_pct, min_relvol, rsi_threshold): ticker
+                for ticker in target_tickers
+            }
+            for future in as_completed(future_to_ticker):
+                completed += 1
+                res = future.result()
+                if res:
+                    rows.append(res)
+                progress.progress(completed / total)
+                status_text.caption(f"Scanning {completed}/{total} stocks... ({int(completed/total*100)}%)")
+
+        status_text.empty()
         out = pd.DataFrame(rows)
         if not out.empty:
-            out = out.sort_values(["Signal","Score"], ascending=[True,False])
+            out = out.sort_values(["Signal","Score","Daily RSI"], ascending=[True,False,False])
             st.session_state["scan"] = out
+            st.session_state["scanned_universe"] = f"{universe_choice} ({len(target_tickers)} stocks)"
+
     if "scan" in st.session_state:
         out = st.session_state["scan"]
         buys = out[out["Signal"]=="BUY"]
-        st.metric("BUY setups", len(buys))
-        if buys.empty:
-            st.info("No qualifying setups today. Cash is a valid position.")
+        scanned_info = st.session_state.get("scanned_universe", "")
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("BUY Setups", len(buys))
+        m2.metric("Watchlist Candidates", len(out) - len(buys))
+        if scanned_info:
+            m3.metric("Scanned Universe", scanned_info)
+
+        filter_sym = st.text_input("🔍 Quick search / filter symbol (e.g. UNIONBANK, TATA):", "").strip().upper()
+        filtered_out = out[out["Symbol"].str.contains(filter_sym, na=False)] if filter_sym else out
+        filtered_buys = filtered_out[filtered_out["Signal"]=="BUY"]
+
+        st.markdown("### Qualifying BUY Setups")
+        if filtered_buys.empty:
+            if buys.empty:
+                st.info("No qualifying BUY setups found. Cash is a valid position.")
+            else:
+                st.info(f"No BUY setups matching search '{filter_sym}'.")
         else:
-            st.dataframe(buys, use_container_width=True, hide_index=True)
-        with st.expander("All candidates"):
-            st.dataframe(out, use_container_width=True, hide_index=True)
-        st.download_button("Download scanner CSV", out.to_csv(index=False), "scanner.csv", "text/csv")
+            st.dataframe(filtered_buys, use_container_width=True, hide_index=True)
+
+        with st.expander(f"All Scanned Candidates ({len(filtered_out)} displayed)"):
+            st.dataframe(filtered_out, use_container_width=True, hide_index=True)
+
+        st.download_button("📥 Download scanner CSV", out.to_csv(index=False), "scanner.csv", "text/csv")
 
 with tabs[1]:
     st.subheader("Single-stock historical backtest")

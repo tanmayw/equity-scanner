@@ -3,7 +3,9 @@
 A deployable Streamlit app for a rules-based Indian equity swing strategy.
 
 ## Features
-- Nifty 50 momentum scanner
+- **Multi-Index Momentum Scanner**: Scan Nifty 50, Nifty Next 50, Nifty Midcap 100, Nifty Midcap 150, Nifty 500, or Custom Watchlists
+- **Fast Parallel Scanning**: Multi-threaded async downloads for scanning up to 500 stocks in seconds
+- **In-App Symbol Search**: Filter scan results instantly by stock ticker (e.g. `UNIONBANK`, `TATA`)
 - Weekly + daily trend filters
 - RSI and relative-volume confirmation
 - 10-day breakout signal
