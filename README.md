@@ -17,8 +17,8 @@ This is a research/decision-support tool, not a guarantee of returns or investme
 
 ## Deploy on Streamlit Community Cloud
 1. Create a GitHub repository.
-2. Upload `app.py` and `requirements.txt`.
-3. Go to Streamlit Community Cloud and create an app using `app.py`.
+2. Upload `streamlit_app.py` and `requirements.txt`.
+3. Go to Streamlit Community Cloud and create an app using `streamlit_app.py`.
 4. Select Python 3.12 if offered.
 5. Deploy.
 
@@ -26,6 +26,6 @@ No API key is required for the default Yahoo Finance data source.
 
 ## Suggested repository structure
 trend-momentum-4/
-  app.py
+  streamlit_app.py
   requirements.txt
   README.md
