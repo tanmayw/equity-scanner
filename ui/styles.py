@@ -156,9 +156,8 @@ h3 { font-size: 1.15rem !important; }
 [data-testid="stDataFrame"] {
     border: 1px solid #30363d !important;
     border-radius: 10px !important;
-    overflow: hidden !important;
 }
-.dvn-scroller { background: #0d1117 !important; }
+
 
 /* ── Expanders ────────────────────────────────── */
 [data-testid="stExpander"] {
