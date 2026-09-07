@@ -97,24 +97,36 @@ watches = out[out["Signal"] == "WATCH"]
 scanned_info = st.session_state.get("scanned_universe", "")
 
 # ── Summary metrics ───────────────────────────────────────────────────────
+rs_outperformers = len(out[out["RS Outperforming"] == True]) if "RS Outperforming" in out.columns else 0
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("🟢 BUY Setups", len(buys))
 m2.metric("👀 Watchlist", len(watches))
-m3.metric("📦 Universe Scanned", scanned_info.split("(")[-1].replace(")", "") if scanned_info else "—")
+m3.metric("⚡ RS > Nifty 50", f"{rs_outperformers}/{len(out)}")
 m4.metric("💰 Capital Deployed / Trade", f"₹{capital * risk_pct / 100:,.0f} risk")
 
 st.divider()
 
 # ── Filter ────────────────────────────────────────────────────────────────
-filter_sym = st.text_input("🔍 Filter symbol", "", placeholder="e.g. RELIANCE, HDFC…").strip().upper()
-filtered = out[out["Symbol"].str.contains(filter_sym, na=False)] if filter_sym else out
+col_f1, col_f2 = st.columns([2.5, 1.2])
+with col_f1:
+    filter_sym = st.text_input("🔍 Filter symbol", "", placeholder="e.g. RELIANCE, HDFC…").strip().upper()
+with col_f2:
+    default_rs = settings.get("rs_filter", False)
+    filter_rs = st.checkbox("⚡ Only RS > Nifty 50", value=default_rs, help="Show only stocks with positive Mansfield Relative Strength against Nifty 50 (RS > 0)")
+
+filtered = out.copy()
+if filter_sym:
+    filtered = filtered[filtered["Symbol"].str.contains(filter_sym, na=False)]
+if filter_rs and "RS Outperforming" in filtered.columns:
+    filtered = filtered[filtered["RS Outperforming"] == True]
+
 filtered_buys = filtered[filtered["Signal"] == "BUY"]
 
 # ── BUY setups ────────────────────────────────────────────────────────────
 st.markdown("### 🟢 Qualifying BUY Setups")
 
 if filtered_buys.empty:
-    st.info("No qualifying BUY setups in the current scan. Cash is a valid position. 💰")
+    st.info("No qualifying BUY setups matching filters in the current scan. Cash is a valid position. 💰")
 else:
     clean_syms = filtered_buys["Symbol"].tolist()
 
@@ -133,8 +145,8 @@ else:
 
     # Grid — curated columns only, explicit height to prevent blank collapse
     with col_grid:
-        GRID_COLS = ["Symbol", "Setup", "Score", "Price", "Entry", "Stop", "Target 1", "Daily RSI", "Rel Vol", "Qty", "Risk ₹"]
-        display_df = filtered_buys[GRID_COLS].copy()
+        GRID_COLS = ["Symbol", "Setup", "Score", "RS vs Nifty", "Price", "Entry", "Stop", "Target 1", "Daily RSI", "Rel Vol", "Qty", "Risk ₹"]
+        display_df = filtered_buys[[c for c in GRID_COLS if c in filtered_buys.columns]].copy()
         display_df["Symbol"] = display_df["Symbol"].apply(make_tradingview_url)
 
         n_rows = len(display_df)
@@ -157,6 +169,11 @@ else:
                     format="%d",
                     min_value=0,
                     max_value=100,
+                ),
+                "RS vs Nifty": st.column_config.NumberColumn(
+                    "RS vs Nifty",
+                    help="Mansfield Relative Strength vs Nifty 50 (50D). Positive indicates outperforming benchmark.",
+                    format="%.2f%%",
                 ),
                 "Price": st.column_config.NumberColumn("CMP ₹", format="%.2f"),
                 "Entry": st.column_config.NumberColumn("Entry ₹", format="%.2f"),
@@ -193,6 +210,7 @@ else:
         entry_d = float(row.get("Entry", row["Price"]))
         stop_d = float(row.get("Stop", entry_d * 0.95))
         t1_d = float(row.get("Target 1", entry_d + 2 * max(0.01, entry_d - stop_d)))
+        rs_d = float(row.get("RS vs Nifty", 0.0)) if pd.notna(row.get("RS vs Nifty")) else None
 
         with st.container(border=True):
             render_trade_planner(
@@ -207,6 +225,7 @@ else:
                 risk_pct=risk_pct,
                 key_prefix=f"scanner_{active_sym}",
                 show_add_button=True,
+                rs_val=rs_d,
             )
 
 st.divider()
@@ -217,7 +236,7 @@ with st.expander(f"👀 Watchlist — {len(filtered_watches)} stocks"):
     if filtered_watches.empty:
         st.info("No watchlist candidates.")
     else:
-        WATCH_COLS = ["Symbol", "Setup", "Score", "Price", "Daily RSI", "Weekly RSI", "Rel Vol", "EMA20", "EMA50"]
+        WATCH_COLS = ["Symbol", "Setup", "Score", "RS vs Nifty", "Price", "Daily RSI", "Weekly RSI", "Rel Vol", "EMA20", "EMA50"]
         disp_w = filtered_watches[[c for c in WATCH_COLS if c in filtered_watches.columns]].copy()
         disp_w["Symbol"] = disp_w["Symbol"].apply(make_tradingview_url)
         w_height = min(60 + len(disp_w) * 40, 400)
@@ -231,6 +250,7 @@ with st.expander(f"👀 Watchlist — {len(filtered_watches)} stocks"):
                     "Symbol", display_text=r"#(.*)", pinned=True
                 ),
                 "Score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100),
+                "RS vs Nifty": st.column_config.NumberColumn("RS vs Nifty", format="%.2f%%"),
                 "Price": st.column_config.NumberColumn("CMP ₹", format="%.2f"),
                 "Daily RSI": st.column_config.NumberColumn("RSI", format="%.1f"),
                 "Rel Vol": st.column_config.NumberColumn("Rel Vol", format="%.2f"),

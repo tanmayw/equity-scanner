@@ -41,6 +41,11 @@ def render_sidebar() -> dict:
         st.markdown("**🎛️ Signal Filters**")
         min_relvol = st.slider("Min Relative Volume", 1.0, 3.0, 1.5, 0.1)
         rsi_threshold = st.slider("Daily RSI Threshold", 50, 70, 55)
+        rs_filter = st.checkbox(
+            "⚡ Only RS > Nifty 50",
+            value=st.session_state.get("global_rs_filter", False),
+            help="Filter stocks demonstrating positive Mansfield Relative Strength vs Nifty 50 benchmark (outperforming).",
+        )
 
         st.divider()
         st.markdown(
@@ -56,6 +61,7 @@ def render_sidebar() -> dict:
         "max_positions": max_positions,
         "min_relvol": min_relvol,
         "rsi_threshold": rsi_threshold,
+        "rs_filter": rs_filter,
     }
 
 
@@ -75,6 +81,7 @@ def render_trade_planner(
     risk_pct: float = 0.5,
     key_prefix: str = "tp",
     show_add_button: bool = True,
+    rs_val: float = None,
 ) -> dict:
     """
     Full Trade Planner card. Returns the current trade parameters as dict.
@@ -100,15 +107,27 @@ def render_trade_planner(
     # ── Header ──────────────────────────────────────────
     col_h1, col_h2 = st.columns([2, 1])
     with col_h1:
-        signal_badge = badge("BUY", "buy") if score >= 80 else badge("WATCH", "watch")
+        signal_badge = badge("BUY", "buy") if score >= 70 else badge("WATCH", "watch")
+        rs_str = ""
+        if rs_val is not None:
+            try:
+                rf = float(rs_val)
+                if not (math.isnan(rf) or math.isinf(rf)):
+                    color = "#00d4aa" if rf >= 0 else "#ff4d6d"
+                    sign = "+" if rf > 0 else ""
+                    rs_str = f" &nbsp;|&nbsp; RS vs Nifty: <b style='color:{color}'>{sign}{rf:.1f}%</b>"
+            except (ValueError, TypeError):
+                pass
+
         st.markdown(
             f"<h2 style='margin:0'>{symbol} {signal_badge}</h2>"
             f"<p style='color:#8b949e;font-size:0.82rem;margin:4px 0 0'>"
             f"Setup: <b style='color:#e6edf3'>{setup}</b> &nbsp;|&nbsp; "
             f"Score: <b style='color:#e6edf3'>{score}/100</b> &nbsp;|&nbsp; "
-            f"CMP: <b style='color:#00d4aa'>₹{cmp:,.2f}</b></p>",
+            f"CMP: <b style='color:#00d4aa'>₹{cmp:,.2f}</b>{rs_str}</p>",
             unsafe_allow_html=True,
         )
+
     with col_h2:
         st.link_button(
             "📊 TradingView Chart",

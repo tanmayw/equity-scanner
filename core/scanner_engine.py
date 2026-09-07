@@ -101,14 +101,26 @@ def get_universe_tickers(universe_name: str) -> list[str]:
     return NIFTY50_FALLBACK
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def get_benchmark_history(ticker: str = "^NSEI", period: str = "2y") -> pd.Series:
+    """Fetch Nifty 50 benchmark Close prices for relative strength calculation."""
+    try:
+        df = fetch_history(ticker, period=period)
+        if not df.empty and "Close" in df.columns:
+            return df["Close"]
+    except Exception:
+        pass
+    return pd.Series(dtype=float)
+
+
 # ---------------------------------------------------------------------------
 # Scan executor
 # ---------------------------------------------------------------------------
 
-def scan_single_stock(ticker, capital, risk_pct, min_relvol, rsi_threshold):
+def scan_single_stock(ticker, capital, risk_pct, min_relvol, rsi_threshold, bench_series=None):
     try:
         df = fetch_history(ticker, "2y", "1d")
-        return signal_for(ticker, df, capital, risk_pct, min_relvol, rsi_threshold)
+        return signal_for(ticker, df, capital, risk_pct, min_relvol, rsi_threshold, bench_series=bench_series)
     except Exception:
         return None
 
@@ -120,9 +132,11 @@ def run_scan(
     min_relvol: float,
     rsi_threshold: float,
     progress_callback=None,
+    bench_ticker: str = "^NSEI",
 ) -> pd.DataFrame:
     """
-    Parallel scan of all tickers. progress_callback(completed, total) for UI updates.
+    Parallel scan of all tickers with Nifty 50 benchmark RS calculation.
+    progress_callback(completed, total) for UI updates.
     Returns a sorted DataFrame of scan results.
     """
     rows = []
@@ -130,13 +144,16 @@ def run_scan(
     completed = 0
     max_workers = min(15, max(4, total // 10))
 
+    bench_series = get_benchmark_history(bench_ticker)
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
-                scan_single_stock, ticker, capital, risk_pct, min_relvol, rsi_threshold
+                scan_single_stock, ticker, capital, risk_pct, min_relvol, rsi_threshold, bench_series
             ): ticker
             for ticker in tickers
         }
+
         for future in as_completed(futures):
             completed += 1
             result = future.result()

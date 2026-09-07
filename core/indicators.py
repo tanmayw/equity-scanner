@@ -74,6 +74,49 @@ def weekly_filter(df: pd.DataFrame):
 
 
 # ---------------------------------------------------------------------------
+# Relative Strength vs Benchmark (e.g. Nifty 50)
+# ---------------------------------------------------------------------------
+
+def calc_relative_strength(
+    stock_series: pd.Series,
+    bench_series: pd.Series | None = None,
+    ma_period: int = 50,
+) -> tuple[float, bool]:
+    """
+    Computes Mansfield Relative Strength (MRS) vs Benchmark (Nifty 50).
+    MRS = ((Ratio / SMA(Ratio, 50)) - 1) * 100
+    Returns:
+        rs_value (float): % outperformance over 50-day relative moving average (e.g. +3.4% or -1.2%)
+        is_stronger (bool): True if RS > 0 (stock is outperforming benchmark)
+    """
+    if bench_series is None or stock_series.empty or bench_series.empty:
+        return 0.0, False
+
+    try:
+        s_stock = stock_series.copy()
+        s_bench = bench_series.copy()
+        if hasattr(s_stock.index, "tz") and s_stock.index.tz is not None:
+            s_stock.index = s_stock.index.tz_localize(None)
+        if hasattr(s_bench.index, "tz") and s_bench.index.tz is not None:
+            s_bench.index = s_bench.index.tz_localize(None)
+
+        df = pd.DataFrame({"stock": s_stock, "bench": s_bench}).dropna()
+        if len(df) < ma_period:
+            return 0.0, False
+
+        ratio = df["stock"] / df["bench"]
+        ratio_ma = ratio.rolling(ma_period).mean()
+        if pd.isna(ratio_ma.iloc[-1]) or ratio_ma.iloc[-1] == 0:
+            return 0.0, False
+
+        mrs = ((ratio.iloc[-1] / ratio_ma.iloc[-1]) - 1.0) * 100.0
+        val = round(float(mrs), 2)
+        return val, bool(val > 0.0)
+    except Exception:
+        return 0.0, False
+
+
+# ---------------------------------------------------------------------------
 # Signal Generator
 # ---------------------------------------------------------------------------
 
@@ -84,6 +127,7 @@ def signal_for(
     risk_pct: float,
     min_relvol: float,
     rsi_threshold: float,
+    bench_series: pd.Series | None = None,
 ) -> dict | None:
     """
     Compute the trading signal for a single ticker.
@@ -94,6 +138,7 @@ def signal_for(
 
     d = add_indicators(df)
     wk_ok, wk = weekly_filter(df)
+    rs_val, rs_ok = calc_relative_strength(d["Close"], bench_series)
     last = d.iloc[-1]
 
     prev10 = last["Prev10High"]
@@ -117,6 +162,8 @@ def signal_for(
             "Weekly RSI": round(wk.get("Weekly RSI", np.nan), 1),
             "Daily RSI": round(float(last["RSI14"]), 1),
             "Rel Vol": round(float(last["RelVol"]), 2),
+            "RS vs Nifty": rs_val,
+            "RS Outperforming": rs_ok,
             "EMA20": round(float(last["EMA20"]), 2),
             "EMA50": round(float(last["EMA50"]), 2),
             "Entry": np.nan,
@@ -141,11 +188,12 @@ def signal_for(
     target1 = entry + 2 * risk_per_share
 
     score = 0
-    score += 25 if wk_ok else 0
-    score += 25 if trend else 0
+    score += 20 if wk_ok else 0
+    score += 20 if trend else 0
     score += 20 if momentum else 0
     score += 20 if volume else 0
     score += 10 if breakout else 0
+    score += 10 if rs_ok else 0
 
     return {
         "Symbol": ticker.replace(".NS", "").replace(".BO", ""),
@@ -154,6 +202,8 @@ def signal_for(
         "Weekly RSI": round(wk.get("Weekly RSI", np.nan), 1),
         "Daily RSI": round(float(last["RSI14"]), 1),
         "Rel Vol": round(float(last["RelVol"]), 2),
+        "RS vs Nifty": rs_val,
+        "RS Outperforming": rs_ok,
         "EMA20": round(float(last["EMA20"]), 2),
         "EMA50": round(float(last["EMA50"]), 2),
         "Entry": round(entry, 2),
@@ -162,8 +212,9 @@ def signal_for(
         "Qty": qty,
         "Risk ₹": round(qty * risk_per_share, 2),
         "Score": score,
-        "Signal": "BUY" if score >= 80 else "WATCH",
+        "Signal": "BUY" if score >= 70 else "WATCH",
     }
+
 
 
 # ---------------------------------------------------------------------------
