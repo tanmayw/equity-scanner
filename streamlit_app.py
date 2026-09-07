@@ -465,33 +465,19 @@ with tabs[0]:
             else:
                 st.info(f"No BUY setups matching search '{filter_sym}'.")
         else:
-            # Store list of clean symbols for state lookup and callbacks
+            # Store list of clean symbols for state lookup
             clean_buy_symbols = filtered_buys["Symbol"].tolist()
-            st.session_state["active_buy_symbols_list"] = clean_buy_symbols
 
             # Ensure selected_buy_symbol is valid
             if "selected_buy_symbol" not in st.session_state or st.session_state["selected_buy_symbol"] not in clean_buy_symbols:
                 st.session_state["selected_buy_symbol"] = clean_buy_symbols[0]
 
-            # Callback when user clicks the "Plan" button in the dataframe
-            def handle_buy_plan_click():
-                click_info = st.session_state.get("buy_plan_btn")
-                if click_info is not None:
-                    row_idx = getattr(click_info, "row", None)
-                    if row_idx is None and isinstance(click_info, dict):
-                        row_idx = click_info.get("row")
-                    syms = st.session_state.get("active_buy_symbols_list", [])
-                    if row_idx is not None and 0 <= row_idx < len(syms):
-                        chosen = syms[row_idx]
-                        st.session_state["selected_buy_symbol"] = chosen
-                        st.session_state["planner_dropdown_selector"] = chosen
-
-            # Also provide quick pill buttons right above for effortless 1-click switching
+            # Quick stock selector pills right above for effortless 1-click switching
             current_active = st.session_state["selected_buy_symbol"]
             curr_pill_idx = clean_buy_symbols.index(current_active) if current_active in clean_buy_symbols else 0
 
             pills_selection = st.pills(
-                "⚡ Quick Stock Selector for Trade Planner:",
+                "⚡ Select Stock for Trade Planner:",
                 clean_buy_symbols,
                 default=clean_buy_symbols[curr_pill_idx],
                 key="buy_stock_pills"
@@ -503,10 +489,9 @@ with tabs[0]:
 
             col_grid, col_planner = st.columns([1.55, 1.0], gap="medium")
 
-            # Prepare display dataframe with clickable TradingView links and Plan button
+            # Prepare display dataframe with clickable TradingView links
             display_buys = filtered_buys.copy()
             display_buys["Symbol"] = display_buys["Symbol"].apply(make_tradingview_url)
-            display_buys.insert(1, "Plan", "🧮 Plan")
 
             with col_grid:
                 grid_config = {
@@ -515,13 +500,6 @@ with tabs[0]:
                         help="Click to open TradingView interactive chart in new tab",
                         display_text=r"#(.*)",
                         pinned=True
-                    ),
-                    "Plan": st.column_config.ButtonColumn(
-                        "Plan",
-                        help="Click to load into the Trade Planner widget",
-                        on_click=handle_buy_plan_click,
-                        key="buy_plan_btn",
-                        width="small"
                     )
                 }
 
