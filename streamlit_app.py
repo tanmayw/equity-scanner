@@ -180,11 +180,13 @@ def render_trade_planner_widget(stock_row, capital, risk_pct, key_prefix="widget
             stop = st.number_input(
                 "Stop Loss (₹)",
                 min_value=0.01,
-                max_value=max(0.01, entry - 0.01),
-                value=round(min(stop_default, entry - 0.01), 2),
+                value=round(stop_default, 2),
                 step=0.5,
                 key=f"{key_prefix}_stop"
             )
+
+        if stop >= entry:
+            st.warning("⚠️ Stop loss should be below entry price for a long setup.")
 
         per_share_risk = max(entry - stop, 0.01)
         risk_2r_tgt = entry + 2 * per_share_risk
@@ -194,19 +196,22 @@ def render_trade_planner_widget(stock_row, capital, risk_pct, key_prefix="widget
         with c3:
             target1 = st.number_input(
                 "Target 1 (₹)",
-                min_value=round(entry + 0.01, 2),
-                value=round(max(target_default, entry + 0.05), 2),
+                min_value=0.05,
+                value=round(target_default, 2),
                 step=0.5,
                 key=f"{key_prefix}_tgt1"
             )
         with c4:
             target2 = st.number_input(
                 "Target 2 (₹) [3R Extension]",
-                min_value=round(entry + 0.01, 2),
+                min_value=0.05,
                 value=round(risk_3r_tgt, 2),
                 step=0.5,
                 key=f"{key_prefix}_tgt2"
             )
+
+        if target1 <= entry:
+            st.warning("⚠️ Target 1 should be above entry price for a long setup.")
 
         with st.expander("⚙️ Adjust Capital & Risk for this trade", expanded=False):
             t_cap = st.number_input("Trade Capital (₹)", 10000, 10000000, int(capital), 5000, key=f"{key_prefix}_cap")
@@ -460,28 +465,48 @@ with tabs[0]:
             else:
                 st.info(f"No BUY setups matching search '{filter_sym}'.")
         else:
+            # Store list of clean symbols for state lookup and callbacks
+            clean_buy_symbols = filtered_buys["Symbol"].tolist()
+            st.session_state["active_buy_symbols_list"] = clean_buy_symbols
+
+            # Ensure selected_buy_symbol is valid
+            if "selected_buy_symbol" not in st.session_state or st.session_state["selected_buy_symbol"] not in clean_buy_symbols:
+                st.session_state["selected_buy_symbol"] = clean_buy_symbols[0]
+
+            # Callback when user clicks the "Plan" button in the dataframe
+            def handle_buy_plan_click():
+                click_info = st.session_state.get("buy_plan_btn")
+                if click_info is not None:
+                    row_idx = getattr(click_info, "row", None)
+                    if row_idx is None and isinstance(click_info, dict):
+                        row_idx = click_info.get("row")
+                    syms = st.session_state.get("active_buy_symbols_list", [])
+                    if row_idx is not None and 0 <= row_idx < len(syms):
+                        chosen = syms[row_idx]
+                        st.session_state["selected_buy_symbol"] = chosen
+                        st.session_state["planner_dropdown_selector"] = chosen
+
+            # Also provide quick pill buttons right above for effortless 1-click switching
+            current_active = st.session_state["selected_buy_symbol"]
+            curr_pill_idx = clean_buy_symbols.index(current_active) if current_active in clean_buy_symbols else 0
+
+            pills_selection = st.pills(
+                "⚡ Quick Stock Selector for Trade Planner:",
+                clean_buy_symbols,
+                default=clean_buy_symbols[curr_pill_idx],
+                key="buy_stock_pills"
+            )
+            if pills_selection and pills_selection != st.session_state["selected_buy_symbol"]:
+                st.session_state["selected_buy_symbol"] = pills_selection
+                st.session_state["planner_dropdown_selector"] = pills_selection
+                st.rerun()
+
             col_grid, col_planner = st.columns([1.55, 1.0], gap="medium")
 
             # Prepare display dataframe with clickable TradingView links and Plan button
             display_buys = filtered_buys.copy()
-            clean_buy_symbols = display_buys["Symbol"].tolist()
             display_buys["Symbol"] = display_buys["Symbol"].apply(make_tradingview_url)
             display_buys.insert(1, "Plan", "🧮 Plan")
-
-            # Check if user clicked a "Plan" button in the table
-            if "buy_plan_btn" in st.session_state and st.session_state.buy_plan_btn is not None:
-                btn_state = st.session_state.buy_plan_btn
-                btn_row = getattr(btn_state, "row", None)
-                if btn_row is None and isinstance(btn_state, dict):
-                    btn_row = btn_state.get("row")
-                if btn_row is not None and 0 <= btn_row < len(clean_buy_symbols):
-                    st.session_state["selected_buy_symbol"] = clean_buy_symbols[btn_row]
-
-            # Resolve active symbol
-            active_sym = st.session_state.get("selected_buy_symbol")
-            if not active_sym or active_sym not in clean_buy_symbols:
-                active_sym = clean_buy_symbols[0]
-                st.session_state["selected_buy_symbol"] = active_sym
 
             with col_grid:
                 grid_config = {
@@ -494,6 +519,7 @@ with tabs[0]:
                     "Plan": st.column_config.ButtonColumn(
                         "Plan",
                         help="Click to load into the Trade Planner widget",
+                        on_click=handle_buy_plan_click,
                         key="buy_plan_btn",
                         width="small"
                     )
@@ -516,20 +542,31 @@ with tabs[0]:
                         new_sym = clean_buy_symbols[sel_row]
                         if new_sym != st.session_state.get("selected_buy_symbol"):
                             st.session_state["selected_buy_symbol"] = new_sym
+                            st.session_state["planner_dropdown_selector"] = new_sym
                             st.rerun()
 
             with col_planner:
-                curr_idx = clean_buy_symbols.index(active_sym) if active_sym in clean_buy_symbols else 0
-                chosen_sym = st.selectbox(
+                def on_dropdown_select():
+                    new_sym = st.session_state.get("planner_dropdown_selector")
+                    if new_sym and new_sym in clean_buy_symbols:
+                        st.session_state["selected_buy_symbol"] = new_sym
+
+                # Keep dropdown synced with selected_buy_symbol
+                active_sym = st.session_state.get("selected_buy_symbol", clean_buy_symbols[0])
+                if active_sym not in clean_buy_symbols:
+                    active_sym = clean_buy_symbols[0]
+                    st.session_state["selected_buy_symbol"] = active_sym
+
+                if "planner_dropdown_selector" not in st.session_state or st.session_state["planner_dropdown_selector"] != active_sym:
+                    st.session_state["planner_dropdown_selector"] = active_sym
+
+                st.selectbox(
                     "🎯 Plan Trade for Stock:",
                     clean_buy_symbols,
-                    index=curr_idx,
                     key="planner_dropdown_selector",
+                    on_change=on_dropdown_select,
                     help="Select any BUY candidate or click any row / 🧮 Plan button in the table to plan trade"
                 )
-                if chosen_sym != active_sym:
-                    st.session_state["selected_buy_symbol"] = chosen_sym
-                    active_sym = chosen_sym
 
                 stock_row = filtered_buys[filtered_buys["Symbol"] == active_sym].iloc[0]
                 render_trade_planner_widget(
