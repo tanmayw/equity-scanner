@@ -83,7 +83,19 @@ def render_trade_planner(
     from core.scanner_engine import make_tradingview_url
     from core.paper_book import add_trade
 
-    cmp = cmp or entry_default
+    import math
+
+    def _safe_float(val, fallback: float) -> float:
+        try:
+            f = float(val)
+            return fallback if (math.isnan(f) or math.isinf(f)) else f
+        except (TypeError, ValueError):
+            return fallback
+
+    entry_default = _safe_float(entry_default, 100.0)
+    stop_default = _safe_float(stop_default, entry_default * 0.95)
+    target1_default = _safe_float(target1_default, entry_default * 1.10)
+    cmp = _safe_float(cmp if cmp is not None else entry_default, entry_default)
 
     # ── Header ──────────────────────────────────────────
     col_h1, col_h2 = st.columns([2, 1])
@@ -113,7 +125,7 @@ def render_trade_planner(
     with c2:
         stop = st.number_input("Stop Loss (₹)", 0.01, value=round(stop_default, 2), step=0.5, key=f"{key_prefix}_stop")
     with c3:
-        per_share_risk = max(entry - stop, 0.01)
+        per_share_risk = max(entry - stop, 0.01) if entry > stop else 0.01
         auto_t1 = round(entry + 2 * per_share_risk, 2)
         target1 = st.number_input("Target 1 (₹) [2R]", 0.05, value=round(target1_default, 2), step=0.5, key=f"{key_prefix}_t1")
     with c4:
@@ -135,16 +147,18 @@ def render_trade_planner(
             t_risk = st.slider("Risk per Trade (%)", 0.1, 2.0, float(risk_pct), 0.1, key=f"{key_prefix}_rpct")
 
     # ── Calculations ───────────────────────────────────────
-    per_share_risk = max(entry - stop, 0.01)
-    risk_budget = t_cap * t_risk / 100
-    qty = max(0, int(risk_budget / per_share_risk))
+    per_share_risk = max(entry - stop, 0.01) if (entry > stop) else 0.01
+    risk_budget = (t_cap * t_risk / 100) if t_cap and t_risk else 0.0
+    calc_qty = risk_budget / per_share_risk if per_share_risk > 0 else 0
+    qty = max(0, int(calc_qty)) if not (math.isnan(calc_qty) or math.isinf(calc_qty)) else 0
     pos_val = qty * entry
     cap_pct = (pos_val / t_cap * 100) if t_cap > 0 else 0
     total_risk = qty * per_share_risk
-    rr1 = (target1 - entry) / per_share_risk if per_share_risk > 0 else 0
-    rr2 = (target2 - entry) / per_share_risk if per_share_risk > 0 else 0
+    rr1 = ((target1 - entry) / per_share_risk) if per_share_risk > 0 else 0
+    rr2 = ((target2 - entry) / per_share_risk) if per_share_risk > 0 else 0
     gain1 = qty * (target1 - entry)
     gain2 = qty * (target2 - entry)
+
 
     # ── Metrics ────────────────────────────────────────────
     st.markdown("##### 📊 Position Summary")
