@@ -484,7 +484,6 @@ with tabs[0]:
             )
             if pills_selection and pills_selection != st.session_state["selected_buy_symbol"]:
                 st.session_state["selected_buy_symbol"] = pills_selection
-                st.session_state["planner_dropdown_selector"] = pills_selection
                 st.rerun()
 
             col_grid, col_planner = st.columns([1.55, 1.0], gap="medium")
@@ -520,31 +519,13 @@ with tabs[0]:
                         new_sym = clean_buy_symbols[sel_row]
                         if new_sym != st.session_state.get("selected_buy_symbol"):
                             st.session_state["selected_buy_symbol"] = new_sym
-                            st.session_state["planner_dropdown_selector"] = new_sym
                             st.rerun()
 
             with col_planner:
-                def on_dropdown_select():
-                    new_sym = st.session_state.get("planner_dropdown_selector")
-                    if new_sym and new_sym in clean_buy_symbols:
-                        st.session_state["selected_buy_symbol"] = new_sym
-
-                # Keep dropdown synced with selected_buy_symbol
                 active_sym = st.session_state.get("selected_buy_symbol", clean_buy_symbols[0])
                 if active_sym not in clean_buy_symbols:
                     active_sym = clean_buy_symbols[0]
                     st.session_state["selected_buy_symbol"] = active_sym
-
-                if "planner_dropdown_selector" not in st.session_state or st.session_state["planner_dropdown_selector"] != active_sym:
-                    st.session_state["planner_dropdown_selector"] = active_sym
-
-                st.selectbox(
-                    "🎯 Plan Trade for Stock:",
-                    clean_buy_symbols,
-                    key="planner_dropdown_selector",
-                    on_change=on_dropdown_select,
-                    help="Select any BUY candidate or click any row / 🧮 Plan button in the table to plan trade"
-                )
 
                 stock_row = filtered_buys[filtered_buys["Symbol"] == active_sym].iloc[0]
                 render_trade_planner_widget(
