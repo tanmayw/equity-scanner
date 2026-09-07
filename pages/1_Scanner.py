@@ -131,15 +131,20 @@ else:
 
     col_grid, col_plan = st.columns([1.6, 1.0], gap="large")
 
-    # Grid
+    # Grid — curated columns only, explicit height to prevent blank collapse
     with col_grid:
-        display_df = filtered_buys.copy()
+        GRID_COLS = ["Symbol", "Setup", "Score", "Price", "Entry", "Stop", "Target 1", "Daily RSI", "Rel Vol", "Qty", "Risk ₹"]
+        display_df = filtered_buys[GRID_COLS].copy()
         display_df["Symbol"] = display_df["Symbol"].apply(make_tradingview_url)
+
+        n_rows = len(display_df)
+        grid_height = min(60 + n_rows * 40, 480)  # dynamic height, capped at 480px
 
         buy_event = st.dataframe(
             display_df,
             use_container_width=True,
             hide_index=True,
+            height=grid_height,
             column_config={
                 "Symbol": st.column_config.LinkColumn(
                     "Symbol",
@@ -147,18 +152,19 @@ else:
                     display_text=r"#(.*)",
                     pinned=True,
                 ),
-                "Signal": st.column_config.TextColumn("Signal"),
                 "Score": st.column_config.ProgressColumn(
                     "Score",
                     format="%d",
                     min_value=0,
                     max_value=100,
                 ),
-                "Rel Vol": st.column_config.NumberColumn("Rel Vol", format="%.2f"),
                 "Price": st.column_config.NumberColumn("CMP ₹", format="%.2f"),
                 "Entry": st.column_config.NumberColumn("Entry ₹", format="%.2f"),
                 "Stop": st.column_config.NumberColumn("Stop ₹", format="%.2f"),
                 "Target 1": st.column_config.NumberColumn("T1 ₹", format="%.2f"),
+                "Daily RSI": st.column_config.NumberColumn("RSI", format="%.1f"),
+                "Rel Vol": st.column_config.NumberColumn("Rel Vol", format="%.2f"),
+                "Qty": st.column_config.NumberColumn("Qty", format="%d"),
                 "Risk ₹": st.column_config.NumberColumn("Risk ₹", format="%.0f"),
             },
             on_select="rerun",
@@ -211,17 +217,23 @@ with st.expander(f"👀 Watchlist — {len(filtered_watches)} stocks"):
     if filtered_watches.empty:
         st.info("No watchlist candidates.")
     else:
-        disp_w = filtered_watches.copy()
+        WATCH_COLS = ["Symbol", "Setup", "Score", "Price", "Daily RSI", "Weekly RSI", "Rel Vol", "EMA20", "EMA50"]
+        disp_w = filtered_watches[[c for c in WATCH_COLS if c in filtered_watches.columns]].copy()
         disp_w["Symbol"] = disp_w["Symbol"].apply(make_tradingview_url)
+        w_height = min(60 + len(disp_w) * 40, 400)
         st.dataframe(
             disp_w,
             use_container_width=True,
             hide_index=True,
+            height=w_height,
             column_config={
                 "Symbol": st.column_config.LinkColumn(
                     "Symbol", display_text=r"#(.*)", pinned=True
                 ),
                 "Score": st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100),
+                "Price": st.column_config.NumberColumn("CMP ₹", format="%.2f"),
+                "Daily RSI": st.column_config.NumberColumn("RSI", format="%.1f"),
+                "Rel Vol": st.column_config.NumberColumn("Rel Vol", format="%.2f"),
             },
         )
 
