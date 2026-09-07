@@ -131,10 +131,112 @@ def signal_for(ticker, df, capital, risk_pct, min_relvol, rsi_threshold):
         "Stop": round(stop,2),
         "Target 1": round(target1,2),
         "Qty": qty,
-        "Risk ₹": round(qty * risk_per_share,2),
+        "Risk ₹": round(qty * risk_per_share, 2),
         "Score": score,
         "Signal": "BUY" if score >= 80 else "WATCH"
     }
+
+def make_tradingview_url(sym: str) -> str:
+    clean = str(sym).strip().upper()
+    if clean.endswith(".NS"):
+        clean = clean[:-3]
+    elif clean.endswith(".BO"):
+        bse_sym = clean[:-3]
+        return f"https://in.tradingview.com/chart/?symbol=BSE:{bse_sym}#{clean}"
+    tv_ticker = clean.replace("&", "_")
+    return f"https://in.tradingview.com/chart/?symbol=NSE:{tv_ticker}#{clean}"
+
+def render_trade_planner_widget(stock_row, capital, risk_pct, key_prefix="widget"):
+    sym = stock_row.get("Symbol", "STOCK")
+    entry_default = float(stock_row.get("Entry", stock_row.get("Price", 100.0)))
+    stop_default = float(stock_row.get("Stop", entry_default * 0.95))
+    target_default = float(stock_row.get("Target 1", entry_default + 2 * max(0.01, entry_default - stop_default)))
+    setup_name = stock_row.get("Setup", "Trend")
+    score_val = stock_row.get("Score", 80)
+    cur_price = stock_row.get("Price", entry_default)
+
+    with st.container(border=True):
+        st.markdown(f"### 🧮 Trade Planner: **{sym}**")
+        st.caption(f"Setup: **{setup_name}** | Momentum Score: **{score_val}/100** | CMP: **₹{cur_price:,.2f}**")
+
+        st.link_button(
+            f"📈 Open {sym} Chart on TradingView",
+            make_tradingview_url(sym),
+            use_container_width=True
+        )
+
+        st.markdown("---")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            entry = st.number_input(
+                "Entry Price (₹)",
+                min_value=0.05,
+                value=round(entry_default, 2),
+                step=0.5,
+                key=f"{key_prefix}_entry"
+            )
+        with c2:
+            stop = st.number_input(
+                "Stop Loss (₹)",
+                min_value=0.01,
+                max_value=max(0.01, entry - 0.01),
+                value=round(min(stop_default, entry - 0.01), 2),
+                step=0.5,
+                key=f"{key_prefix}_stop"
+            )
+
+        per_share_risk = max(entry - stop, 0.01)
+        risk_2r_tgt = entry + 2 * per_share_risk
+        risk_3r_tgt = entry + 3 * per_share_risk
+
+        c3, c4 = st.columns(2)
+        with c3:
+            target1 = st.number_input(
+                "Target 1 (₹)",
+                min_value=round(entry + 0.01, 2),
+                value=round(max(target_default, entry + 0.05), 2),
+                step=0.5,
+                key=f"{key_prefix}_tgt1"
+            )
+        with c4:
+            target2 = st.number_input(
+                "Target 2 (₹) [3R Extension]",
+                min_value=round(entry + 0.01, 2),
+                value=round(risk_3r_tgt, 2),
+                step=0.5,
+                key=f"{key_prefix}_tgt2"
+            )
+
+        with st.expander("⚙️ Adjust Capital & Risk for this trade", expanded=False):
+            t_cap = st.number_input("Trade Capital (₹)", 10000, 10000000, int(capital), 5000, key=f"{key_prefix}_cap")
+            t_risk_pct = st.slider("Risk per trade (%)", 0.1, 2.0, float(risk_pct), 0.1, key=f"{key_prefix}_riskpct")
+
+        risk_budget = t_cap * t_risk_pct / 100
+        qty = max(0, int(risk_budget / per_share_risk)) if per_share_risk > 0 else 0
+        pos_val = qty * entry
+        cap_deployed_pct = (pos_val / t_cap * 100) if t_cap > 0 else 0
+        total_risk = qty * per_share_risk
+        rr1 = (target1 - entry) / per_share_risk if per_share_risk > 0 else 0
+        gain1 = qty * (target1 - entry)
+        gain2 = qty * (target2 - entry)
+
+        st.markdown("##### Sizing & Metrics")
+        m_col1, m_col2 = st.columns(2)
+        m_col1.metric("Recommended Qty", f"{qty} shares")
+        m_col2.metric("Position Capital", f"₹{pos_val:,.2f}", f"{cap_deployed_pct:.1f}% deployed")
+
+        m_col3, m_col4 = st.columns(2)
+        m_col3.metric("Total Risk", f"₹{total_risk:,.2f}", f"-₹{per_share_risk:,.2f} / share")
+        m_col4.metric("Reward : Risk (T1)", f"1 : {rr1:.2f}")
+
+        m_col5, m_col6 = st.columns(2)
+        m_col5.metric("Target 1 Profit", f"+₹{gain1:,.2f}", f"+{(target1/entry - 1)*100:.1f}%")
+        m_col6.metric("Target 2 Profit", f"+₹{gain2:,.2f}", f"+{(target2/entry - 1)*100:.1f}%")
+
+        order_code = f"BUY {qty} {sym} LIMIT ₹{entry:.2f} | SL: ₹{stop:.2f} | T1: ₹{target1:.2f}"
+        st.code(order_code, language="text")
+        st.caption("💡 Move SL to breakeven after Target 1 is hit; trail remaining half with 20 EMA.")
 
 NSE_INDEX_URLS = {
     "Nifty 50": "https://archives.nseindia.com/content/indices/ind_nifty50list.csv",
@@ -358,10 +460,101 @@ with tabs[0]:
             else:
                 st.info(f"No BUY setups matching search '{filter_sym}'.")
         else:
-            st.dataframe(filtered_buys, use_container_width=True, hide_index=True)
+            col_grid, col_planner = st.columns([1.55, 1.0], gap="medium")
+
+            # Prepare display dataframe with clickable TradingView links and Plan button
+            display_buys = filtered_buys.copy()
+            clean_buy_symbols = display_buys["Symbol"].tolist()
+            display_buys["Symbol"] = display_buys["Symbol"].apply(make_tradingview_url)
+            display_buys.insert(1, "Plan", "🧮 Plan")
+
+            # Check if user clicked a "Plan" button in the table
+            if "buy_plan_btn" in st.session_state and st.session_state.buy_plan_btn is not None:
+                btn_state = st.session_state.buy_plan_btn
+                btn_row = getattr(btn_state, "row", None)
+                if btn_row is None and isinstance(btn_state, dict):
+                    btn_row = btn_state.get("row")
+                if btn_row is not None and 0 <= btn_row < len(clean_buy_symbols):
+                    st.session_state["selected_buy_symbol"] = clean_buy_symbols[btn_row]
+
+            # Resolve active symbol
+            active_sym = st.session_state.get("selected_buy_symbol")
+            if not active_sym or active_sym not in clean_buy_symbols:
+                active_sym = clean_buy_symbols[0]
+                st.session_state["selected_buy_symbol"] = active_sym
+
+            with col_grid:
+                grid_config = {
+                    "Symbol": st.column_config.LinkColumn(
+                        "Symbol",
+                        help="Click to open TradingView interactive chart in new tab",
+                        display_text=r"#(.*)",
+                        pinned=True
+                    ),
+                    "Plan": st.column_config.ButtonColumn(
+                        "Plan",
+                        help="Click to load into the Trade Planner widget",
+                        key="buy_plan_btn",
+                        width="small"
+                    )
+                }
+
+                buy_event = st.dataframe(
+                    display_buys,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=grid_config,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="buy_grid_table"
+                )
+
+                # If user selected a row in the table, sync to active symbol
+                if buy_event and hasattr(buy_event, "selection") and buy_event.selection and buy_event.selection.rows:
+                    sel_row = buy_event.selection.rows[0]
+                    if 0 <= sel_row < len(clean_buy_symbols):
+                        new_sym = clean_buy_symbols[sel_row]
+                        if new_sym != st.session_state.get("selected_buy_symbol"):
+                            st.session_state["selected_buy_symbol"] = new_sym
+                            st.rerun()
+
+            with col_planner:
+                curr_idx = clean_buy_symbols.index(active_sym) if active_sym in clean_buy_symbols else 0
+                chosen_sym = st.selectbox(
+                    "🎯 Plan Trade for Stock:",
+                    clean_buy_symbols,
+                    index=curr_idx,
+                    key="planner_dropdown_selector",
+                    help="Select any BUY candidate or click any row / 🧮 Plan button in the table to plan trade"
+                )
+                if chosen_sym != active_sym:
+                    st.session_state["selected_buy_symbol"] = chosen_sym
+                    active_sym = chosen_sym
+
+                stock_row = filtered_buys[filtered_buys["Symbol"] == active_sym].iloc[0]
+                render_trade_planner_widget(
+                    stock_row,
+                    capital=capital,
+                    risk_pct=risk_pct,
+                    key_prefix=f"widget_{active_sym}"
+                )
 
         with st.expander(f"All Scanned Candidates ({len(filtered_out)} displayed)"):
-            st.dataframe(filtered_out, use_container_width=True, hide_index=True)
+            display_all = filtered_out.copy()
+            display_all["Symbol"] = display_all["Symbol"].apply(make_tradingview_url)
+            st.dataframe(
+                display_all,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Symbol": st.column_config.LinkColumn(
+                        "Symbol",
+                        help="Click to open TradingView interactive chart in new tab",
+                        display_text=r"#(.*)",
+                        pinned=True
+                    )
+                }
+            )
 
         st.download_button("📥 Download scanner CSV", out.to_csv(index=False), "scanner.csv", "text/csv")
 
@@ -388,17 +581,44 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("Position / Risk Planner")
-    entry = st.number_input("Entry price", min_value=0.05, value=1000.0, step=1.0)
-    stop = st.number_input("Stop price", min_value=0.01, value=980.0, step=1.0)
-    target = st.number_input("Target price", min_value=0.05, value=1040.0, step=1.0)
-    risk_rupees = capital * risk_pct / 100
-    per_share = abs(entry-stop)
-    qty = int(risk_rupees/per_share) if per_share > 0 else 0
-    st.metric("Suggested quantity", qty)
-    st.metric("Position value", f"₹{qty*entry:,.0f}")
-    st.metric("Risk", f"₹{qty*per_share:,.0f}")
-    rr = abs(target-entry)/per_share if per_share > 0 else 0
-    st.metric("R:R", f"1 : {rr:.2f}")
+
+    scanned_buys = []
+    if "scan" in st.session_state and not st.session_state["scan"].empty:
+        scanned_buys = st.session_state["scan"][st.session_state["scan"]["Signal"] == "BUY"]["Symbol"].tolist()
+
+    if scanned_buys:
+        selected_to_load = st.selectbox(
+            "Load setup from scanner:",
+            ["-- Custom / Manual Entry --"] + scanned_buys,
+            key="tab2_stock_loader"
+        )
+        if selected_to_load != "-- Custom / Manual Entry --":
+            loaded_row = st.session_state["scan"][st.session_state["scan"]["Symbol"] == selected_to_load].iloc[0]
+            render_trade_planner_widget(loaded_row, capital, risk_pct, key_prefix="tab2_loaded")
+        else:
+            entry = st.number_input("Entry price", min_value=0.05, value=1000.0, step=1.0, key="tab2_manual_entry")
+            stop = st.number_input("Stop price", min_value=0.01, value=980.0, step=1.0, key="tab2_manual_stop")
+            target = st.number_input("Target price", min_value=0.05, value=1040.0, step=1.0, key="tab2_manual_tgt")
+            risk_rupees = capital * risk_pct / 100
+            per_share = abs(entry-stop)
+            qty = int(risk_rupees/per_share) if per_share > 0 else 0
+            st.metric("Suggested quantity", qty)
+            st.metric("Position value", f"₹{qty*entry:,.0f}")
+            st.metric("Risk", f"₹{qty*per_share:,.0f}")
+            rr = abs(target-entry)/per_share if per_share > 0 else 0
+            st.metric("R:R", f"1 : {rr:.2f}")
+    else:
+        entry = st.number_input("Entry price", min_value=0.05, value=1000.0, step=1.0, key="tab2_manual_entry")
+        stop = st.number_input("Stop price", min_value=0.01, value=980.0, step=1.0, key="tab2_manual_stop")
+        target = st.number_input("Target price", min_value=0.05, value=1040.0, step=1.0, key="tab2_manual_tgt")
+        risk_rupees = capital * risk_pct / 100
+        per_share = abs(entry-stop)
+        qty = int(risk_rupees/per_share) if per_share > 0 else 0
+        st.metric("Suggested quantity", qty)
+        st.metric("Position value", f"₹{qty*entry:,.0f}")
+        st.metric("Risk", f"₹{qty*per_share:,.0f}")
+        rr = abs(target-entry)/per_share if per_share > 0 else 0
+        st.metric("R:R", f"1 : {rr:.2f}")
 
 with tabs[3]:
     st.subheader("Trading rules")
