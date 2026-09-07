@@ -284,9 +284,13 @@ hr { border-color: #30363d !important; }
     border: 1px solid #30363d;
     border-radius: 12px;
     padding: 16px 20px;
-    transition: border-color 0.2s;
+    transition: all 0.2s ease;
 }
-.stat-card:hover { border-color: #388bfd; }
+.stat-card:hover {
+    border-color: #00d4aa !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 212, 170, 0.12);
+}
 .stat-label {
     font-size: 0.72rem;
     color: #8b949e;

@@ -69,23 +69,29 @@ st.divider()
 c1, c2, c3, c4, c5 = st.columns(5)
 
 nav_cards = [
-    ("📊", "Scanner", "Scan Nifty universes for breakout & momentum setups", "pages/1_Scanner"),
-    ("🎯", "Trade Planner", "Calculate position size, R:R, and order details", "pages/2_Trade_Planner"),
-    ("📋", "Paper Trading", "Track simulated trades & monthly performance", "pages/3_Paper_Trading"),
-    ("🧪", "Backtest", "Test strategy on historical data with real costs", "pages/4_Backtest"),
-    ("📘", "Rules", "System rules for entries, exits, and risk management", "pages/5_Rules"),
+    ("📊", "Scanner", "Scan Nifty universes for breakout & momentum setups", "pages/1_Scanner.py", "/Scanner"),
+    ("🎯", "Trade Planner", "Calculate position size, R:R, and order details", "pages/2_Trade_Planner.py", "/Trade_Planner"),
+    ("📋", "Paper Trading", "Track simulated trades & monthly performance", "pages/3_Paper_Trading.py", "/Paper_Trading"),
+    ("🧪", "Backtest", "Test strategy on historical data with real costs", "pages/4_Backtest.py", "/Backtest"),
+    ("📘", "Rules", "System rules for entries, exits, and risk management", "pages/5_Rules.py", "/Rules"),
 ]
 
-for col, (icon, title, desc, _) in zip([c1, c2, c3, c4, c5], nav_cards):
+for col, (icon, title, desc, page_path, route) in zip([c1, c2, c3, c4, c5], nav_cards):
     with col:
         st.markdown(
-            f"""<div class='stat-card' style='text-align:center;cursor:pointer;min-height:130px'>
-                <p style='font-size:1.8rem;margin:0 0 8px'>{icon}</p>
-                <p style='font-weight:700;color:#e6edf3;margin:0 0 4px;font-size:0.95rem'>{title}</p>
-                <p style='color:#8b949e;font-size:0.75rem;margin:0;line-height:1.4'>{desc}</p>
-            </div>""",
+            f"""<a href="{route}" target="_self" style="text-decoration:none; color:inherit; display:block;">
+                <div class='stat-card' style='text-align:center;cursor:pointer;min-height:140px;transition:transform 0.18s ease, border-color 0.18s ease;'>
+                    <p style='font-size:2rem;margin:0 0 8px'>{icon}</p>
+                    <p style='font-weight:700;color:#e6edf3;margin:0 0 4px;font-size:1rem'>{title}</p>
+                    <p style='color:#8b949e;font-size:0.75rem;margin:0 0 10px;line-height:1.4'>{desc}</p>
+                    <span style='font-size:0.78rem;color:#00d4aa;font-weight:600'>Open →</span>
+                </div>
+            </a>""",
             unsafe_allow_html=True,
         )
+        if st.button(f"Launch {title}", key=f"btn_nav_{title}", use_container_width=True):
+            st.switch_page(page_path)
+
 
 st.divider()
 
