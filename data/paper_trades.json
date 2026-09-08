@@ -1,1 +1,24 @@
-[]
+[
+  {
+    "trade_id": "675F1025",
+    "symbol": "RELIANCE",
+    "setup": "Breakout",
+    "entry": 1400.0,
+    "stop": 1350.0,
+    "target1": 1500.0,
+    "target2": 1550.0,
+    "qty": 20,
+    "capital_used": 28000.0,
+    "risk_per_share": 50.0,
+    "total_risk": 1000.0,
+    "entry_date": "2026-09-07",
+    "exit_price": null,
+    "exit_date": null,
+    "exit_reason": null,
+    "pnl": null,
+    "pnl_pct": null,
+    "r_multiple": null,
+    "notes": "Initial swing trade",
+    "status": "OPEN"
+  }
+]

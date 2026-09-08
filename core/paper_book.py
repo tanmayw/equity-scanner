@@ -229,3 +229,43 @@ def _schema_columns() -> list[str]:
 
 def _empty_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_schema_columns())
+
+
+def export_trades_json() -> str:
+    """Export all trades as a formatted JSON string."""
+    trades = _load_raw()
+    return json.dumps(trades, indent=2, default=str)
+
+
+def import_trades(json_data: list[dict] | str, replace: bool = False) -> int:
+    """
+    Import trades from a JSON string or list of dicts.
+    If replace is True, replaces existing. Otherwise merges by trade_id.
+    Returns the count of trades saved.
+    """
+    if isinstance(json_data, str):
+        parsed = json.loads(json_data)
+    else:
+        parsed = json_data
+
+    if not isinstance(parsed, list):
+        raise ValueError("Invalid format: expected a list of trade objects.")
+
+    if replace:
+        _save_raw(parsed)
+        return len(parsed)
+
+    existing = _load_raw()
+    existing_ids = {t.get("trade_id") for t in existing if isinstance(t, dict)}
+    added = 0
+    for item in parsed:
+        if isinstance(item, dict):
+            tid = item.get("trade_id") or str(uuid.uuid4())[:8].upper()
+            item["trade_id"] = tid
+            if tid not in existing_ids:
+                existing.append(item)
+                existing_ids.add(tid)
+                added += 1
+    _save_raw(existing)
+    return added
+

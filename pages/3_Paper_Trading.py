@@ -25,8 +25,11 @@ from core.paper_book import (
     delete_trade,
     monthly_stats,
     equity_curve,
+    export_trades_json,
+    import_trades,
 )
 from core.scanner_engine import get_history
+
 
 inject_css()
 settings = render_sidebar()
@@ -66,12 +69,14 @@ m5.metric("📐 Avg R Multiple", f"{avg_r:.2f}R")
 st.divider()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
-tab_open, tab_close, tab_report, tab_add = st.tabs([
+tab_open, tab_close, tab_report, tab_add, tab_backup = st.tabs([
     f"🟢 Open ({total_open})",
     f"📁 History ({total_closed})",
     "📊 Monthly Report",
     "➕ Add Trade",
+    "💾 Backup & Data",
 ])
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -351,3 +356,61 @@ with tab_add:
                 )
                 st.success(f"✅ Trade added! ID: **{trade_id}** — {a_sym} {a_qty}×₹{a_entry:.2f}")
                 st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 5 — BACKUP & DATA PERSISTENCE
+# ═══════════════════════════════════════════════════════════════════════════
+with tab_backup:
+    st.markdown("##### 💾 Paper Trades Storage & Backup")
+    st.info(
+        "💡 **Automatic Persistence:** All your paper trades are saved permanently to disk at `data/paper_trades.json`. "
+        "They remain saved across app restarts, browser closes, and page refreshes."
+    )
+
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        st.markdown("###### 📥 Export / Download Backup")
+        st.caption("Download a copy of your paper trading journal to keep a local backup.")
+        json_data = export_trades_json()
+        st.download_button(
+            "📥 Download Backup (JSON)",
+            json_data,
+            file_name=f"paper_trades_backup_{date.today().isoformat()}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+        if not df.empty:
+            st.download_button(
+                "📊 Export All Trades (CSV)",
+                df.to_csv(index=False),
+                file_name=f"paper_trades_{date.today().isoformat()}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+    with col_b2:
+        st.markdown("###### 📤 Restore from Backup")
+        st.caption("Upload a previously saved `paper_trades_backup.json` to restore your trades.")
+        uploaded_backup = st.file_uploader("Choose backup JSON file", type=["json"], key="backup_uploader")
+        if uploaded_backup is not None:
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                if st.button("🔄 Merge Trades", type="primary", use_container_width=True):
+                    try:
+                        content = uploaded_backup.getvalue().decode("utf-8")
+                        count = import_trades(content, replace=False)
+                        st.success(f"✅ Successfully merged {count} trades!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error importing backup: {e}")
+            with col_m2:
+                if st.button("⚠️ Replace All", use_container_width=True):
+                    try:
+                        content = uploaded_backup.getvalue().decode("utf-8")
+                        count = import_trades(content, replace=True)
+                        st.success(f"✅ Successfully replaced journal with {count} trades!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error importing backup: {e}")
+

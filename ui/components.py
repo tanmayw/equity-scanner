@@ -48,6 +48,18 @@ def render_sidebar() -> dict:
         )
 
         st.divider()
+        try:
+            from core.paper_book import load_trades
+            p_trades = load_trades()
+            n_open = len(p_trades[p_trades["status"] == "OPEN"]) if not p_trades.empty else 0
+            n_closed = len(p_trades[p_trades["status"] == "CLOSED"]) if not p_trades.empty else 0
+            st.markdown(f"**📋 Paper Portfolio** &nbsp;<span class='badge-open' style='font-size:0.7rem;padding:1px 6px'>{n_open} Open</span>", unsafe_allow_html=True)
+            st.caption(f"💾 Saved to disk: **{n_open}** open · **{n_closed}** closed")
+            st.page_link("pages/3_Paper_Trading.py", label="Open Paper Journal →", icon="📋")
+        except Exception:
+            pass
+
+        st.divider()
         st.markdown(
             "<p style='color:#8b949e;font-size:0.72rem;line-height:1.5'>"
             "Rules-based research tool.<br>Not investment advice."
@@ -88,7 +100,7 @@ def render_trade_planner(
     If user clicks 'Add to Paper Book', also returns add_triggered=True.
     """
     from core.scanner_engine import make_tradingview_url
-    from core.paper_book import add_trade
+    from core.paper_book import add_trade, load_trades
 
     import math
 
@@ -178,7 +190,6 @@ def render_trade_planner(
     gain1 = qty * (target1 - entry)
     gain2 = qty * (target2 - entry)
 
-
     # ── Metrics ────────────────────────────────────────────
     st.markdown("##### 📊 Position Summary")
     m1, m2, m3, m4 = st.columns(4)
@@ -200,11 +211,30 @@ def render_trade_planner(
 
     # ── Add to Paper Book ──────────────────────────────────
     add_triggered = False
+    existing_open = []
+    try:
+        cur_df = load_trades()
+        if not cur_df.empty and "symbol" in cur_df.columns:
+            existing_open = cur_df[(cur_df["symbol"] == symbol.upper()) & (cur_df["status"] == "OPEN")]["trade_id"].tolist()
+    except Exception:
+        pass
+
+    if existing_open:
+        st.caption(f"📌 **{symbol}** is already an active open position in your Paper Journal (ID: `{existing_open[0]}`).")
+
     if show_add_button and qty > 0:
-        if st.button(f"📋 Add to Paper Book — {symbol}", type="primary", use_container_width=True, key=f"{key_prefix}_add"):
+        btn_label = f"📋 Add to Paper Book — {symbol}" if not existing_open else f"➕ Add Another {symbol} Position"
+        if st.button(btn_label, type="primary", use_container_width=True, key=f"{key_prefix}_add"):
             trade_id = add_trade(symbol, setup, entry, stop, target1, target2, qty, t_cap)
-            st.toast(f"✅ {symbol} added to Paper Book! Trade ID: {trade_id}", icon="📋")
+            st.session_state[f"{key_prefix}_last_added_id"] = trade_id
+            st.toast(f"✅ {symbol} saved to Paper Book! Trade ID: {trade_id}", icon="📋")
             add_triggered = True
+
+    if st.session_state.get(f"{key_prefix}_last_added_id"):
+        added_id = st.session_state[f"{key_prefix}_last_added_id"]
+        st.success(f"✅ **{symbol}** is saved in your Paper Trading Journal! (ID: `{added_id}`)")
+        st.page_link("pages/3_Paper_Trading.py", label="Open Paper Trading Journal →", icon="📋")
+
 
     return {
         "symbol": symbol,

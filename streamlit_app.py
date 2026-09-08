@@ -63,18 +63,37 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+from core.paper_book import load_trades
+try:
+    p_df = load_trades()
+    n_open_trades = len(p_df[p_df["status"] == "OPEN"]) if not p_df.empty else 0
+except Exception:
+    n_open_trades = 0
+
 st.divider()
+
+if n_open_trades > 0:
+    st.markdown(
+        f"""<div style='background:rgba(0,212,170,0.08);border:1px solid rgba(0,212,170,0.3);border-radius:10px;padding:12px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between'>
+            <span>📋 <b>Paper Portfolio:</b> You have <b style='color:#00d4aa'>{n_open_trades} active open position{'s' if n_open_trades != 1 else ''}</b> saved on disk.</span>
+            <a href='/Paper_Trading' target='_self' style='color:#00d4aa;font-weight:600;font-size:0.85rem;text-decoration:none'>Manage Open Positions →</a>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 # ── Quick-nav cards ───────────────────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns(5)
 
+paper_desc = f"Track simulated trades · {n_open_trades} Open" if n_open_trades > 0 else "Track simulated trades & monthly performance"
+
 nav_cards = [
     ("📊", "Scanner", "Scan Nifty universes for breakout & momentum setups", "pages/1_Scanner.py", "/Scanner"),
     ("🎯", "Trade Planner", "Calculate position size, R:R, and order details", "pages/2_Trade_Planner.py", "/Trade_Planner"),
-    ("📋", "Paper Trading", "Track simulated trades & monthly performance", "pages/3_Paper_Trading.py", "/Paper_Trading"),
+    ("📋", "Paper Trading", paper_desc, "pages/3_Paper_Trading.py", "/Paper_Trading"),
     ("🧪", "Backtest", "Test strategy on historical data with real costs", "pages/4_Backtest.py", "/Backtest"),
     ("📘", "Rules", "System rules for entries, exits, and risk management", "pages/5_Rules.py", "/Rules"),
 ]
+
 
 for col, (icon, title, desc, page_path, route) in zip([c1, c2, c3, c4, c5], nav_cards):
     with col:
