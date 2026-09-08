@@ -21,15 +21,40 @@ import pandas as pd
 
 st.set_page_config(page_title="Scanner · TrendMomentum", page_icon="📊", layout="wide")
 
+import importlib
+import core.indicators
+import core.scanner_engine
+
+try:
+    importlib.reload(core.indicators)
+except Exception:
+    pass
+
+try:
+    importlib.reload(core.scanner_engine)
+except Exception:
+    pass
+
 from ui.styles import inject_css, badge
 from ui.components import render_sidebar, render_trade_planner
 from core.scanner_engine import (
     get_universe_tickers,
     run_scan,
-    run_pullback_scan,
     make_tradingview_url,
     NSE_INDEX_URLS,
 )
+
+try:
+    from core.scanner_engine import run_pullback_scan
+except ImportError:
+    # Warm process fallback: force re-reload and import
+    try:
+        importlib.reload(core.indicators)
+        importlib.reload(core.scanner_engine)
+        from core.scanner_engine import run_pullback_scan
+    except Exception:
+        def run_pullback_scan(*args, **kwargs):
+            return pd.DataFrame()
 
 inject_css()
 settings = render_sidebar()
