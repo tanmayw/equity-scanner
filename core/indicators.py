@@ -220,6 +220,149 @@ def signal_for(
 
 
 # ---------------------------------------------------------------------------
+# 20 EMA Pullback Signal
+# ---------------------------------------------------------------------------
+
+def pullback_20ema_signal(
+    ticker: str,
+    df: pd.DataFrame,
+    capital: float,
+    risk_pct: float,
+    min_relvol: float,
+    bench_series: pd.Series | None = None,
+) -> dict | None:
+    """
+    Detect a confirmed pullback-to-20EMA setup.
+
+    Conditions
+    ----------
+    1. Uptrend: Close > EMA20 > EMA50 (current bar)
+    2. Weekly trend confirmed (W-Close > W-EMA20, W-RSI > 55)
+    3. Pullback touch within last 3 bars: Low ≤ EMA20 ≤ High  OR
+       Close came within 0.5 % of EMA20 (near-touch)
+    4. Confirmation candle (bar AFTER the touch): Close > Open AND
+       Close > EMA20  (bullish bounce)
+    5. RSI on confirmation candle is 40–70 (recovering, not overbought)
+
+    Stop  → below the pullback-touch candle Low (floored at 1× ATR)
+    Target → entry + 2 × risk_per_share  (2R)
+    """
+    if df.empty or len(df) < 100:
+        return None
+
+    d = add_indicators(df)
+    if d.empty or len(d) < 5:
+        return None
+
+    # ── weekly context ───────────────────────────────────────────────────
+    wk_ok, wk = weekly_filter(df)
+    rs_val, rs_ok = calc_relative_strength(d["Close"], bench_series)
+
+    # ── current bar must be in uptrend ───────────────────────────────────
+    last = d.iloc[-1]
+    if not (last["Close"] > last["EMA20"] > last["EMA50"]):
+        return None
+
+    # ── search last 3 bars (excluding today) for a pullback touch ────────
+    # We look at bars [-4], [-3], [-2] as potential touch bars;
+    # the bar immediately after the touch must be bullish (confirmation).
+    # "today" (bar[-1]) is the confirmation candle we check.
+    touch_idx = None
+    touch_bar = None
+
+    # Check bars at offsets -4, -3, -2 relative to end
+    # Confirmation candle = the bar that immediately follows the touch bar
+    for offset in range(2, 5):  # offset 2 → bar[-3], offset 3 → bar[-4], etc.
+        if offset >= len(d):
+            break
+        candidate = d.iloc[-offset - 1]   # potential touch bar
+        confirm   = d.iloc[-offset]        # bar immediately after touch
+
+        ema20_at_touch = candidate["EMA20"]
+        if pd.isna(ema20_at_touch):
+            continue
+
+        # Condition 3 – touch or near-touch
+        low_touch  = candidate["Low"]  <= ema20_at_touch <= candidate["High"]
+        near_touch = abs(candidate["Close"] - ema20_at_touch) / ema20_at_touch <= 0.005
+
+        if not (low_touch or near_touch):
+            continue
+
+        # Condition 4 – confirmation candle is bullish and above EMA20
+        ema20_at_confirm = confirm["EMA20"]
+        if pd.isna(ema20_at_confirm):
+            continue
+        bullish_confirm = (
+            confirm["Close"] > confirm["Open"]
+            and confirm["Close"] > ema20_at_confirm
+        )
+        if not bullish_confirm:
+            continue
+
+        # Condition 5 – RSI on confirmation bar in recovery zone
+        rsi_confirm = confirm["RSI14"]
+        if pd.isna(rsi_confirm) or not (40 <= rsi_confirm <= 70):
+            continue
+
+        touch_idx = -offset - 1
+        touch_bar = candidate
+        break   # take the most recent valid touch
+
+    if touch_bar is None:
+        return None   # no valid setup found
+
+    # ── entry / risk / sizing ────────────────────────────────────────────
+    entry = float(last["Close"])   # enter at today's close (or next open)
+    atrv  = float(last["ATR14"]) if pd.notna(last["ATR14"]) else entry * 0.02
+
+    # Stop below the pullback candle's low, with an ATR floor
+    raw_stop = float(touch_bar["Low"])
+    atr_stop = entry - atrv
+    stop = min(raw_stop, atr_stop)
+    if stop >= entry:
+        stop = entry - max(atrv, entry * 0.015)
+
+    risk_per_share = max(entry - stop, 0.01)
+    risk_budget    = capital * risk_pct / 100
+    qty            = max(0, int(risk_budget / risk_per_share))
+    target1        = entry + 2 * risk_per_share
+    target2        = entry + 3 * risk_per_share
+
+    # ── scoring ──────────────────────────────────────────────────────────
+    score = 0
+    score += 25 if wk_ok else 0                                      # weekly trend
+    score += 20 if last["EMA20"] > last["EMA50"] else 0              # strong trend
+    confirm_bar  = d.iloc[-1]
+    score += 20 if (confirm_bar["Close"] > confirm_bar["Open"]) else 0  # bullish close
+    rsi_today = float(last["RSI14"]) if pd.notna(last["RSI14"]) else 0
+    score += 15 if 45 <= rsi_today <= 65 else 0                      # healthy RSI
+    score += 10 if last["RelVol"] >= min_relvol else 5               # volume (soft)
+    score += 10 if rs_ok else 0                                       # RS vs Nifty
+
+    return {
+        "Symbol":       ticker.replace(".NS", "").replace(".BO", ""),
+        "Setup":        "EMA Pullback",
+        "Price":        round(entry, 2),
+        "EMA20":        round(float(last["EMA20"]), 2),
+        "EMA50":        round(float(last["EMA50"]), 2),
+        "Daily RSI":    round(float(last["RSI14"]), 1),
+        "Weekly RSI":   round(wk.get("Weekly RSI", np.nan), 1),
+        "Rel Vol":      round(float(last["RelVol"]), 2),
+        "RS vs Nifty":  rs_val,
+        "RS Outperforming": rs_ok,
+        "Entry":        round(entry, 2),
+        "Stop":         round(stop, 2),
+        "Target 1":     round(target1, 2),
+        "Target 2":     round(target2, 2),
+        "Qty":          qty,
+        "Risk ₹":       round(qty * risk_per_share, 2),
+        "Score":        score,
+        "Signal":       "BUY" if score >= 60 else "WATCH",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Backtest Engine
 # ---------------------------------------------------------------------------
 

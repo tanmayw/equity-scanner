@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-from core.indicators import signal_for
+from core.indicators import signal_for, pullback_20ema_signal
 
 # ---------------------------------------------------------------------------
 # Universe definitions
@@ -154,6 +154,62 @@ def run_scan(
             for ticker in tickers
         }
 
+        for future in as_completed(futures):
+            completed += 1
+            result = future.result()
+            if result:
+                rows.append(result)
+            if progress_callback:
+                progress_callback(completed, total)
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(rows)
+    return out.sort_values(
+        ["Signal", "Score", "Daily RSI"], ascending=[True, False, False]
+    ).reset_index(drop=True)
+
+
+
+# ---------------------------------------------------------------------------
+# Pullback scan executor
+# ---------------------------------------------------------------------------
+
+def scan_pullback_stock(ticker, capital, risk_pct, min_relvol, bench_series=None):
+    try:
+        df = fetch_history(ticker, "2y", "1d")
+        return pullback_20ema_signal(ticker, df, capital, risk_pct, min_relvol, bench_series=bench_series)
+    except Exception:
+        return None
+
+
+def run_pullback_scan(
+    tickers: list[str],
+    capital: float,
+    risk_pct: float,
+    min_relvol: float,
+    progress_callback=None,
+    bench_ticker: str = "^NSEI",
+) -> pd.DataFrame:
+    """
+    Parallel 20 EMA pullback scan across all tickers.
+    Returns a sorted DataFrame of candidates (BUY first, then WATCH).
+    """
+    rows = []
+    total = len(tickers)
+    completed = 0
+    max_workers = min(15, max(4, total // 10))
+
+    bench_series = get_benchmark_history(bench_ticker)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                scan_pullback_stock, ticker, capital, risk_pct, min_relvol, bench_series
+            ): ticker
+            for ticker in tickers
+        }
         for future in as_completed(futures):
             completed += 1
             result = future.result()
