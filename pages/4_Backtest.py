@@ -6,6 +6,16 @@ with real costs (commission + slippage). Shows equity curve,
 monthly returns, and per-trade scatter.
 """
 
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import streamlit as st
 import pandas as pd
 import numpy as np

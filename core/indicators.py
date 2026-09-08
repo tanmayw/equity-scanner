@@ -5,6 +5,8 @@ Pure-Python / Pandas indicator logic for Trend Momentum 4.
 All functions are stateless and dependency-free (only numpy/pandas).
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 

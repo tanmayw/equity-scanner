@@ -5,6 +5,16 @@ Scans Nifty indices for trend + momentum + volume + breakout setups.
 BUY-signal stocks show an inline Trade Planner panel.
 """
 
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import streamlit as st
 import pandas as pd
 

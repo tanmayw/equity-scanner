@@ -5,6 +5,8 @@ Paper Trading Journal CRUD operations.
 All trades persisted in data/paper_trades.json for cross-session durability.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import uuid

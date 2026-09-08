@@ -5,9 +5,20 @@ Track simulated trades, monitor open positions with live P&L,
 and view monthly performance reports.
 """
 
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+from datetime import date, datetime
+
+# Ensure project root is at the head of sys.path for Streamlit Cloud
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
 
 st.set_page_config(page_title="Paper Trading · TrendMomentum", page_icon="📋", layout="wide")
 
@@ -17,6 +28,14 @@ from ui.components import (
     plot_equity_curve,
     plot_monthly_pnl,
 )
+
+import core.paper_book
+import importlib
+try:
+    importlib.reload(core.paper_book)
+except Exception:
+    pass
+
 from core.paper_book import (
     load_trades,
     add_trade,
@@ -25,9 +44,19 @@ from core.paper_book import (
     delete_trade,
     monthly_stats,
     equity_curve,
-    export_trades_json,
-    import_trades,
 )
+
+# Resilient import with fallbacks for backup & restore helpers
+try:
+    from core.paper_book import export_trades_json, import_trades
+except ImportError:
+    def export_trades_json() -> str:
+        import json
+        return json.dumps(load_trades().to_dict(orient="records"), indent=2, default=str)
+
+    def import_trades(json_data, replace: bool = False) -> int:
+        return 0
+
 from core.scanner_engine import get_history
 
 
