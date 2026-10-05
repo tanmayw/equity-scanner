@@ -56,6 +56,17 @@ except ImportError:
         def run_pullback_scan(*args, **kwargs):
             return pd.DataFrame()
 
+try:
+    from core.scanner_engine import run_hammer_scan
+except ImportError:
+    try:
+        importlib.reload(core.indicators)
+        importlib.reload(core.scanner_engine)
+        from core.scanner_engine import run_hammer_scan
+    except Exception:
+        def run_hammer_scan(*args, **kwargs):
+            return pd.DataFrame()
+
 inject_css()
 settings = render_sidebar()
 for k, v in settings.items():
@@ -103,9 +114,10 @@ st.divider()
 # ════════════════════════════════════════════════════════════════════════════
 # TABS
 # ════════════════════════════════════════════════════════════════════════════
-tab_breakout, tab_pullback = st.tabs([
+tab_breakout, tab_pullback, tab_hammer = st.tabs([
     "📊 Momentum Breakout",
     "🔄 20 EMA Pullback",
+    "🔨 Hammer in Downtrend",
 ])
 
 
@@ -418,4 +430,79 @@ with tab_pullback:
             settings=settings,
             grid_cols=PULLBACK_COLS,
             tab_label="EMA Pullback",
+        )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 3 — HAMMER IN DOWNTREND SCANNER
+# ════════════════════════════════════════════════════════════════════════════
+with tab_hammer:
+    col_hdr3, col_btn3 = st.columns([5, 1])
+    with col_hdr3:
+        st.markdown(
+            "**🔨 Hammer in Downtrend** — Spots potential reversal hammers with high volume "
+            "in stocks that are in a confirmed downtrend.",
+        )
+    with col_btn3:
+        hammer_btn = st.button("🔄 Run Scan", type="primary", use_container_width=True, key="hammer_run")
+
+    with st.expander("ℹ️ How the Hammer scanner works", expanded=False):
+        st.markdown("""
+**Hammer in Downtrend — criteria:**
+
+| # | Condition | Detail |
+|---|-----------|--------|
+| 1 | **Downtrend** | EMA20 < EMA50 (bearish structure) |
+| 2 | **Meaningful decline** | Close is ≥ 8 % below the 20-bar high |
+| 3 | **Hammer geometry** | Lower wick ≥ 2 × body · Upper wick ≤ 1 × body · Body ≤ 40 % of range · Closes in upper 60 % of range |
+| 4 | **Volume spike** | Relative Volume ≥ Min Rel Vol setting |
+| 5 | **RSI ≤ 50** | Oversold / recovering zone — not overbought |
+
+**Stop** → 0.5 % below the hammer Low &nbsp;|&nbsp;
+**Target 1** → Entry + 2R &nbsp;|&nbsp; **Target 2** → Entry + 3R
+
+> *Higher score = deeper wick, stronger volume spike, more oversold, and better RS vs Nifty.*
+        """)
+
+    if hammer_btn:
+        prog3 = st.progress(0)
+        stat3 = st.empty()
+
+        def _prog_hammer(done, total):
+            pct = done / total
+            prog3.progress(pct)
+            stat3.caption(f"Scanning {done}/{total} stocks… ({int(pct*100)}%)")
+
+        with st.spinner(""):
+            result3 = run_hammer_scan(
+                target_tickers, capital, risk_pct, min_relvol, _prog_hammer
+            )
+
+        prog3.empty(); stat3.empty()
+
+        if result3.empty:
+            st.warning("No hammer setups found in this universe right now.")
+        else:
+            st.session_state["scan_hammer"] = result3
+            st.session_state["scan_hammer_universe"] = f"{universe_choice} ({len(target_tickers)})"
+            buys_found = len(result3[result3["Signal"] == "BUY"])
+            st.toast(f"✅ Hammer scan — {buys_found} BUY setups found", icon="🔨")
+
+    if "scan_hammer" not in st.session_state:
+        st.info("👆 Click **Run Scan** to find Hammer reversal setups in downtrending stocks.")
+    else:
+        st.caption(f"Universe: {st.session_state.get('scan_hammer_universe', '')}")
+        HAMMER_COLS = [
+            "Symbol", "Setup", "Score", "RS vs Nifty", "Price", "EMA20", "EMA50",
+            "Entry", "Stop", "Target 1", "Target 2",
+            "Daily RSI", "Rel Vol", "Decline %", "Lower Wick Ratio", "Qty", "Risk ₹",
+        ]
+        _render_results(
+            out=st.session_state["scan_hammer"],
+            scan_key="hammer",
+            capital=capital,
+            risk_pct=risk_pct,
+            settings=settings,
+            grid_cols=HAMMER_COLS,
+            tab_label="Hammer Reversal",
         )
