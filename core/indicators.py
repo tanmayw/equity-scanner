@@ -379,20 +379,19 @@ def hammer_downtrend_signal(
 
     Conditions
     ----------
-    1. **Downtrend** (last bar): EMA20 < EMA50 (bearish structure).
-    2. **Recent decline**: Close is below the 20-bar high by at least 8 %
-       (stock has fallen meaningfully — we are not buying a sideways stock).
-    3. **Hammer candle** on the most recent bar:
-       - Lower wick  ≥ 2 × real body
-       - Upper wick  ≤ 1 × real body
-       - Real body   ≤ 40 % of the total candle range (High − Low)
-       - Close is in the upper 60 % of the day's range  (bullish close)
-    4. **Volume spike**: RelVol ≥ min_relvol (confirms institutional participation).
-    5. **Daily RSI** ≤ 50 (we are in oversold / recovering territory, not overbought).
+    1. **Downtrend** (current bar): EMA20 < EMA50 (bearish structure).
+    2. **Recent decline**: Close is below the 20-bar high by at least 5 %.
+    3. **Hammer candle** on any of the last 3 bars:
+       - Lower wick  >= 2 x real body
+       - Upper wick  <= 20 % of candle range  (range-relative, not body-relative)
+       - Real body   <= 40 % of candle range
+       - Close is in the upper 55 % of the day's range
+    4. **Volume spike** on the hammer bar: RelVol >= min_relvol.
+    5. **Daily RSI** on the hammer bar <= 55 (oversold / recovering zone).
 
-    Stop   → 0.5 % below the Hammer Low (tight but meaningful).
-    Target1 → Entry + 2 × risk_per_share (2R reversal target).
-    Target2 → Entry + 3 × risk_per_share.
+    Stop   -> 0.5 % below the Hammer Low.
+    Target1 -> Entry + 2 x risk_per_share  (2R).
+    Target2 -> Entry + 3 x risk_per_share.
     """
     if df.empty or len(df) < 60:
         return None
@@ -411,53 +410,77 @@ def hammer_downtrend_signal(
     # ── Condition 2: Meaningful decline from recent high ─────────────────
     high_20 = float(d["High"].iloc[-21:-1].max()) if len(d) >= 21 else float(d["High"].max())
     decline_pct = (high_20 - float(last["Close"])) / high_20 * 100
-    if decline_pct < 8.0:
+    if decline_pct < 5.0:
         return None
 
-    # ── Condition 3: Hammer geometry ─────────────────────────────────────
-    o = float(last["Open"])
-    h = float(last["High"])
-    lo = float(last["Low"])
-    c = float(last["Close"])
+    # ── Conditions 3+4+5: Search last 3 bars for a valid hammer ──────────
+    # offset 1=today, 2=yesterday, 3=two days ago
+    hammer_bar = None
+    hammer_idx = None
 
-    candle_range = h - lo
-    if candle_range <= 0:
+    for offset in range(1, 4):
+        if offset >= len(d):
+            break
+        bar = d.iloc[-offset]
+
+        o   = float(bar["Open"])
+        h   = float(bar["High"])
+        lo  = float(bar["Low"])
+        c   = float(bar["Close"])
+        rng = h - lo
+        if rng <= 0:
+            continue
+
+        real_body  = abs(c - o)
+        lower_wick = min(o, c) - lo
+        upper_wick = h - max(o, c)
+        close_pos  = (c - lo) / rng
+
+        # Upper wick <= 20% of candle range (not body) — handles tiny-body candles
+        is_hammer = (
+            real_body > 0
+            and lower_wick >= 2.0 * real_body
+            and upper_wick / rng <= 0.20
+            and real_body / rng <= 0.40
+            and close_pos >= 0.55
+        )
+        if not is_hammer:
+            continue
+
+        rel_vol_bar = float(bar["RelVol"]) if pd.notna(bar["RelVol"]) else 0.0
+        if rel_vol_bar < min_relvol:
+            continue
+
+        rsi_bar = float(bar["RSI14"]) if pd.notna(bar["RSI14"]) else 100.0
+        if rsi_bar > 55:
+            continue
+
+        hammer_bar = bar
+        hammer_idx = offset
+        break
+
+    if hammer_bar is None:
         return None
 
-    real_body    = abs(c - o)
-    lower_wick   = min(o, c) - lo
-    upper_wick   = h - max(o, c)
+    # ── Extract hammer bar values ─────────────────────────────────────────
+    h_o   = float(hammer_bar["Open"])
+    h_h   = float(hammer_bar["High"])
+    h_lo  = float(hammer_bar["Low"])
+    h_c   = float(hammer_bar["Close"])
+    h_rng = h_h - h_lo
 
-    body_ratio   = real_body / candle_range        # ≤ 40 %
-    upper_ratio  = upper_wick / candle_range       # ≤ ~20 %
-    close_pos    = (c - lo) / candle_range         # close in upper 60 %
+    real_body  = abs(h_c - h_o)
+    lower_wick = min(h_o, h_c) - h_lo
+    close_pos  = (h_c - h_lo) / h_rng if h_rng > 0 else 0
+    rel_vol    = float(hammer_bar["RelVol"]) if pd.notna(hammer_bar["RelVol"]) else 0.0
+    rsi_val    = float(hammer_bar["RSI14"]) if pd.notna(hammer_bar["RSI14"]) else 0.0
+    bars_ago   = hammer_idx
 
-    is_hammer = (
-        real_body > 0                              # non-doji
-        and lower_wick >= 2.0 * real_body          # long lower wick
-        and upper_wick <= 1.0 * real_body          # small / no upper wick
-        and body_ratio <= 0.40                     # small body
-        and close_pos >= 0.60                      # closes near top
-    )
-    if not is_hammer:
-        return None
-
-    # ── Condition 4: Volume spike ─────────────────────────────────────────
-    rel_vol = float(last["RelVol"]) if pd.notna(last["RelVol"]) else 0.0
-    if rel_vol < min_relvol:
-        return None
-
-    # ── Condition 5: RSI ≤ 50 ─────────────────────────────────────────────
-    rsi_val = float(last["RSI14"]) if pd.notna(last["RSI14"]) else 100.0
-    if rsi_val > 50:
-        return None
-
-    # ── Entry / risk / sizing ─────────────────────────────────────────────
-    entry = c
+    # ── Entry / risk / sizing (entry = today's close) ────────────────────
+    entry = float(last["Close"])
     atrv  = float(last["ATR14"]) if pd.notna(last["ATR14"]) else entry * 0.02
 
-    # Stop just below the hammer low, with ATR as a minimum distance floor
-    raw_stop = lo * 0.995          # 0.5 % below hammer low
+    raw_stop = h_lo * 0.995
     stop = min(raw_stop, entry - atrv)
     if stop >= entry:
         stop = entry - max(atrv, entry * 0.015)
@@ -474,14 +497,16 @@ def hammer_downtrend_signal(
     score += 20 if rel_vol >= min_relvol * 1.5 else 10        # volume strength
     score += 15 if rsi_val <= 35 else (10 if rsi_val <= 45 else 5)  # oversold depth
     score += 15 if close_pos >= 0.75 else 8                   # bullish close quality
-    score += 15 if decline_pct >= 20 else (10 if decline_pct >= 12 else 5)  # trend depth
+    score += 15 if decline_pct >= 20 else (10 if decline_pct >= 10 else 5)  # trend depth
     score += 10 if rs_ok else 0                                # RS vs Nifty
 
     wk_ok, wk = weekly_filter(df)
 
+    setup_label = "Hammer (today)" if bars_ago == 1 else f"Hammer ({bars_ago}d ago)"
+
     return {
         "Symbol":           ticker.replace(".NS", "").replace(".BO", ""),
-        "Setup":            "Hammer Reversal",
+        "Setup":            setup_label,
         "Price":            round(entry, 2),
         "EMA20":            round(float(last["EMA20"]), 2),
         "EMA50":            round(float(last["EMA50"]), 2),
@@ -489,7 +514,7 @@ def hammer_downtrend_signal(
         "Weekly RSI":       round(wk.get("Weekly RSI", np.nan), 1),
         "Rel Vol":          round(rel_vol, 2),
         "Decline %":        round(decline_pct, 1),
-        "Lower Wick Ratio": round(lower_wick / candle_range * 100, 1),
+        "Lower Wick Ratio": round(lower_wick / h_rng * 100, 1),
         "RS vs Nifty":      rs_val,
         "RS Outperforming": rs_ok,
         "Entry":            round(entry, 2),
@@ -497,7 +522,7 @@ def hammer_downtrend_signal(
         "Target 1":         round(target1, 2),
         "Target 2":         round(target2, 2),
         "Qty":              qty,
-        "Risk ₹":           round(qty * risk_per_share, 2),
+        "Risk \u20b9":           round(qty * risk_per_share, 2),
         "Score":            score,
         "Signal":           "BUY" if score >= 55 else "WATCH",
     }
