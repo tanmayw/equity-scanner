@@ -82,7 +82,7 @@ if n_open_trades > 0:
     )
 
 # ── Quick-nav cards ───────────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 
 paper_desc = f"Track simulated trades · {n_open_trades} Open" if n_open_trades > 0 else "Track simulated trades & monthly performance"
 
@@ -92,10 +92,11 @@ nav_cards = [
     ("📋", "Paper Trading", paper_desc, "pages/3_Paper_Trading.py", "/Paper_Trading"),
     ("🧪", "Backtest", "Test strategy on historical data with real costs", "pages/4_Backtest.py", "/Backtest"),
     ("📘", "Rules", "System rules for entries, exits, and risk management", "pages/5_Rules.py", "/Rules"),
+    ("🌡️", "Heatmap", "NSE sector heatmap · live market heat via NSE MCP", "pages/6_Heatmap.py", "/Heatmap"),
 ]
 
 
-for col, (icon, title, desc, page_path, route) in zip([c1, c2, c3, c4, c5], nav_cards):
+for col, (icon, title, desc, page_path, route) in zip([c1, c2, c3, c4, c5, c6], nav_cards):
     with col:
         st.markdown(
             f"""<a href="{route}" target="_self" style="text-decoration:none; color:inherit; display:block;">
