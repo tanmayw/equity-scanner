@@ -13,7 +13,12 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-from core.indicators import signal_for, pullback_20ema_signal, hammer_downtrend_signal
+from core.indicators import (
+    signal_for,
+    pullback_20ema_signal,
+    hammer_downtrend_signal,
+    dow_theory_uptrend_signal,
+)
 
 # ---------------------------------------------------------------------------
 # Universe definitions
@@ -279,6 +284,64 @@ def run_hammer_scan(
     out = pd.DataFrame(rows)
     return out.sort_values(
         ["Signal", "Score"], ascending=[True, False]
+    ).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Dow Theory Uptrend scan executor
+# ---------------------------------------------------------------------------
+
+def scan_dow_stock(ticker, capital, risk_pct, min_relvol, bench_series=None):
+    try:
+        df = fetch_history(ticker, "2y", "1d")
+        return dow_theory_uptrend_signal(
+            ticker, df, capital, risk_pct, min_relvol, bench_series=bench_series
+        )
+    except Exception:
+        return None
+
+
+def run_dow_scan(
+    tickers: list[str],
+    capital: float,
+    risk_pct: float,
+    min_relvol: float,
+    progress_callback=None,
+    bench_ticker: str = "^NSEI",
+) -> pd.DataFrame:
+    """
+    Parallel Dow Theory Uptrend scan across all tickers.
+    Detects stocks forming Higher Lows and breaking above prior Swing Highs (entering uptrend now).
+    Returns a sorted DataFrame (BUY first, then WATCH), ordered by Score desc.
+    """
+    rows = []
+    total = len(tickers)
+    completed = 0
+    max_workers = min(15, max(4, total // 10))
+
+    bench_series = get_benchmark_history(bench_ticker)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                scan_dow_stock, ticker, capital, risk_pct, min_relvol, bench_series
+            ): ticker
+            for ticker in tickers
+        }
+        for future in as_completed(futures):
+            completed += 1
+            result = future.result()
+            if result:
+                rows.append(result)
+            if progress_callback:
+                progress_callback(completed, total)
+
+    if not rows:
+        return pd.DataFrame()
+
+    out = pd.DataFrame(rows)
+    return out.sort_values(
+        ["Signal", "Score", "Daily RSI"], ascending=[True, False, False]
     ).reset_index(drop=True)
 
 

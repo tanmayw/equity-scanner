@@ -377,3 +377,223 @@ def plot_trade_scatter(trades_df: pd.DataFrame) -> None:
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Dow Theory Interactive Candlestick Chart
+# ---------------------------------------------------------------------------
+
+def plot_dow_chart(
+    df: pd.DataFrame,
+    symbol: str,
+    h1: float,
+    l2: float,
+    l1: float | None = None,
+    stop: float | None = None,
+    target1: float | None = None,
+    target2: float | None = None,
+    h1_date: str | None = None,
+    l2_date: str | None = None,
+    l1_date: str | None = None,
+    lookback_bars: int = 75,
+) -> None:
+    """
+    Renders an interactive candlestick chart showing the Dow Theory structure:
+    - Recent price action (candlesticks)
+    - EMA20 and EMA50 overlays
+    - Dow Theory Key Pivots: Base Low (L1), Swing High (H1 Breakout Level), Higher Low (L2)
+    - Reference horizontal lines for Breakout Level, Stop Loss, and Targets
+    """
+    if df.empty or len(df) < 15:
+        st.info("Insufficient price data to plot chart.")
+        return
+
+    d = df.tail(lookback_bars).copy()
+    if "EMA20" not in d.columns:
+        d["EMA20"] = d["Close"].ewm(span=20, adjust=False).mean()
+    if "EMA50" not in d.columns:
+        d["EMA50"] = d["Close"].ewm(span=50, adjust=False).mean()
+
+    fig = go.Figure()
+
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=d.index,
+        open=d["Open"],
+        high=d["High"],
+        low=d["Low"],
+        close=d["Close"],
+        name="OHLC",
+        increasing_line_color="#00d4aa",
+        decreasing_line_color="#ff4d6d",
+        increasing_fillcolor="rgba(0, 212, 170, 0.2)",
+        decreasing_fillcolor="rgba(255, 77, 109, 0.2)",
+    ))
+
+    # EMA20
+    fig.add_trace(go.Scatter(
+        x=d.index,
+        y=d["EMA20"],
+        mode="lines",
+        name="20 EMA",
+        line=dict(color="#00d4aa", width=1.4),
+        opacity=0.85,
+    ))
+
+    # EMA50
+    fig.add_trace(go.Scatter(
+        x=d.index,
+        y=d["EMA50"],
+        mode="lines",
+        name="50 EMA",
+        line=dict(color="#388bfd", width=1.4),
+        opacity=0.85,
+    ))
+
+    # Breakout level (H1)
+    if h1 and not np.isnan(h1):
+        fig.add_hline(
+            y=h1,
+            line_dash="dash",
+            line_color="#e3b341",
+            line_width=1.5,
+            annotation_text=f"Breakout (H1): ₹{h1:,.2f}",
+            annotation_position="top right",
+            annotation_font_color="#e3b341",
+            annotation_font_size=11,
+        )
+
+    # Stop Loss (Higher Low L2)
+    effective_stop = stop if stop and not np.isnan(stop) else l2
+    if effective_stop and not np.isnan(effective_stop):
+        fig.add_hline(
+            y=effective_stop,
+            line_dash="dash",
+            line_color="#ff4d6d",
+            line_width=1.5,
+            annotation_text=f"Stop (HL): ₹{effective_stop:,.2f}",
+            annotation_position="bottom right",
+            annotation_font_color="#ff4d6d",
+            annotation_font_size=11,
+        )
+
+    # Target 1 (2R)
+    if target1 and not np.isnan(target1):
+        fig.add_hline(
+            y=target1,
+            line_dash="dot",
+            line_color="#00d4aa",
+            line_width=1.5,
+            annotation_text=f"Target 1 (2R): ₹{target1:,.2f}",
+            annotation_position="top right",
+            annotation_font_color="#00d4aa",
+            annotation_font_size=11,
+        )
+
+    # Target 2 (3R)
+    if target2 and not np.isnan(target2):
+        fig.add_hline(
+            y=target2,
+            line_dash="dot",
+            line_color="#58a6ff",
+            line_width=1.2,
+            annotation_text=f"Target 2 (3R): ₹{target2:,.2f}",
+            annotation_position="top right",
+            annotation_font_color="#58a6ff",
+            annotation_font_size=11,
+        )
+
+    # Annotate pivot points on the chart if dates match index
+    def _find_date_idx(target_dt_str):
+        if not target_dt_str:
+            return None
+        target_str = str(target_dt_str)[:10]
+        for idx in d.index:
+            if str(idx)[:10] == target_str:
+                return idx
+        return None
+
+    dt_l1 = _find_date_idx(l1_date)
+    if dt_l1 is not None and l1 and not np.isnan(l1):
+        fig.add_annotation(
+            x=dt_l1,
+            y=l1,
+            text=f"🔻 L1 (Base Low)<br>₹{l1:,.1f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1.5,
+            arrowcolor="#8b949e",
+            ax=0,
+            ay=30,
+            font=dict(size=10, color="#8b949e"),
+            bgcolor="rgba(13,17,23,0.85)",
+            bordercolor="#30363d",
+        )
+
+    dt_h1 = _find_date_idx(h1_date)
+    if dt_h1 is not None and h1 and not np.isnan(h1):
+        fig.add_annotation(
+            x=dt_h1,
+            y=h1,
+            text=f"🔺 H1 (Swing High)<br>₹{h1:,.1f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1.5,
+            arrowcolor="#e3b341",
+            ax=0,
+            ay=-30,
+            font=dict(size=10, color="#e3b341"),
+            bgcolor="rgba(13,17,23,0.85)",
+            bordercolor="#e3b341",
+        )
+
+    dt_l2 = _find_date_idx(l2_date)
+    if dt_l2 is not None and l2 and not np.isnan(l2):
+        fig.add_annotation(
+            x=dt_l2,
+            y=l2,
+            text=f"🟢 L2 (Higher Low)<br>₹{l2:,.1f}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1.5,
+            arrowcolor="#00d4aa",
+            ax=0,
+            ay=30,
+            font=dict(size=10, color="#00d4aa"),
+            bgcolor="rgba(13,17,23,0.85)",
+            bordercolor="#00d4aa",
+        )
+
+    fig.update_layout(
+        paper_bgcolor="#0d1117",
+        plot_bgcolor="#0d1117",
+        font=dict(family="Inter, system-ui", color="#e6edf3"),
+        xaxis=dict(
+            gridcolor="#21262d",
+            showgrid=True,
+            zeroline=False,
+            rangeslider=dict(visible=False),
+        ),
+        yaxis=dict(
+            gridcolor="#21262d",
+            showgrid=True,
+            zeroline=False,
+            tickformat="₹,.1f",
+        ),
+        margin=dict(l=10, r=80, t=25, b=10),
+        height=400,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(size=11),
+        ),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True)

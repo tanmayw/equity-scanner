@@ -81,6 +81,18 @@ rules = [
         ],
     },
     {
+        "icon": "🏛️",
+        "title": "6B. Dow Theory Uptrend Initiation",
+        "color": "#00d4aa",
+        "rules": [
+            "Classical Dow Theory defines an uptrend as a sequence of Higher Highs (HH) and Higher Lows (HL).",
+            "Reversal sequence: Base Low (L1) → Swing High (H1) → Higher Low (L2 > L1) → Breakout above H1.",
+            "The breakout above H1 officially terminates the prior trend and initiates the new uptrend.",
+            "Volume confirmation: Volume expands on the breakout leg to confirm institutional demand.",
+            "Structural Stop: Placed strictly below the Higher Low (L2) — breaking L2 invalidates the uptrend.",
+        ],
+    },
+    {
         "icon": "🛑",
         "title": "7. Stop Loss",
         "color": "#ff4d6d",

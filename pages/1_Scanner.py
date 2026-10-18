@@ -36,12 +36,13 @@ except Exception:
     pass
 
 from ui.styles import inject_css, badge
-from ui.components import render_sidebar, render_trade_planner
+from ui.components import render_sidebar, render_trade_planner, plot_dow_chart
 from core.scanner_engine import (
     get_universe_tickers,
     run_scan,
     make_tradingview_url,
     NSE_INDEX_URLS,
+    get_history,
 )
 
 try:
@@ -67,6 +68,17 @@ except ImportError:
         def run_hammer_scan(*args, **kwargs):
             return pd.DataFrame()
 
+try:
+    from core.scanner_engine import run_dow_scan
+except ImportError:
+    try:
+        importlib.reload(core.indicators)
+        importlib.reload(core.scanner_engine)
+        from core.scanner_engine import run_dow_scan
+    except Exception:
+        def run_dow_scan(*args, **kwargs):
+            return pd.DataFrame()
+
 inject_css()
 settings = render_sidebar()
 for k, v in settings.items():
@@ -81,7 +93,7 @@ rsi_threshold = settings["rsi_threshold"]
 st.markdown(
     "<h1>📊 Scanner</h1>"
     "<p style='color:#8b949e;margin-top:-8px'>"
-    "Momentum Breakout & 20 EMA Pullback setups across Nifty universes.</p>",
+    "Momentum Breakout, 20 EMA Pullback, Hammer Reversal & Dow Theory Uptrends across Nifty universes.</p>",
     unsafe_allow_html=True,
 )
 st.divider()
@@ -114,10 +126,11 @@ st.divider()
 # ════════════════════════════════════════════════════════════════════════════
 # TABS
 # ════════════════════════════════════════════════════════════════════════════
-tab_breakout, tab_pullback, tab_hammer = st.tabs([
+tab_breakout, tab_pullback, tab_hammer, tab_dow = st.tabs([
     "📊 Momentum Breakout",
     "🔄 20 EMA Pullback",
     "🔨 Hammer in Downtrend",
+    "🏛️ Dow Theory Uptrend",
 ])
 
 
@@ -132,6 +145,7 @@ def _render_results(
     settings: dict,
     grid_cols: list,
     tab_label: str,
+    show_dow_chart: bool = False,
 ) -> None:
     buys    = out[out["Signal"] == "BUY"]
     watches = out[out["Signal"] == "WATCH"]
@@ -215,6 +229,10 @@ def _render_results(
                     format="%.2f%%",
                 ),
                 "Price":     st.column_config.NumberColumn("CMP ₹",   format="%.2f"),
+                "Breakout (H1)": st.column_config.NumberColumn("Breakout (H1) ₹", format="%.2f"),
+                "Higher Low (L2)": st.column_config.NumberColumn("Higher Low (L2) ₹", format="%.2f"),
+                "Days Ago":  st.column_config.NumberColumn("Days Ago", format="%d"),
+                "Pct Above Breakout": st.column_config.NumberColumn("Breakout %", format="+%.1f%%"),
                 "EMA20":     st.column_config.NumberColumn("EMA20 ₹",  format="%.2f"),
                 "Entry":     st.column_config.NumberColumn("Entry ₹",  format="%.2f"),
                 "Stop":      st.column_config.NumberColumn("Stop ₹",   format="%.2f"),
@@ -274,9 +292,36 @@ def _render_results(
                     rs_val=rs_d,
                 )
 
+        if show_dow_chart and active_sym:
+            row_act = filtered_buys[filtered_buys["Symbol"] == active_sym].iloc[0]
+            sym_t = f"{active_sym}.NS" if not (active_sym.endswith(".NS") or active_sym.endswith(".BO")) else active_sym
+            try:
+                chart_df = get_history(sym_t, period="6mo", interval="1d")
+                if not chart_df.empty:
+                    with st.expander(f"📈 Dow Theory Structure & Pivot Visualizer — {active_sym}", expanded=True):
+                        st.caption(
+                            f"Visualizing Swing High Breakout (H1 = ₹{float(row_act.get('Breakout (H1)', 0)):,.2f}), "
+                            f"Higher Low (L2 = ₹{float(row_act.get('Higher Low (L2)', 0)):,.2f}), and Invalidation Stop/Targets."
+                        )
+                        plot_dow_chart(
+                            chart_df,
+                            symbol=active_sym,
+                            h1=float(row_act.get("Breakout (H1)", 0)),
+                            l2=float(row_act.get("Higher Low (L2)", 0)),
+                            l1=float(row_act.get("Base Low (L1)", 0)) if pd.notna(row_act.get("Base Low (L1)")) else None,
+                            stop=float(row_act.get("Stop", 0)),
+                            target1=float(row_act.get("Target 1", 0)),
+                            target2=float(row_act.get("Target 2", 0)),
+                            h1_date=str(row_act.get("H1_Date", "")),
+                            l2_date=str(row_act.get("L2_Date", "")),
+                            l1_date=str(row_act.get("L1_Date", "")),
+                        )
+            except Exception:
+                pass
+
     st.divider()
 
-    WATCH_COLS = ["Symbol", "Setup", "Score", "RS vs Nifty", "Price", "EMA20",
+    WATCH_COLS = ["Symbol", "Setup", "Score", "RS vs Nifty", "Price", "Breakout (H1)", "Higher Low (L2)", "Days Ago", "EMA20",
                   "Daily RSI", "Weekly RSI", "Rel Vol"]
     with st.expander(f"👀 Watchlist — {len(filtered_watches)} stocks"):
         if filtered_watches.empty:
@@ -296,6 +341,9 @@ def _render_results(
                     "Score":     st.column_config.ProgressColumn("Score", format="%d", min_value=0, max_value=100),
                     "RS vs Nifty": st.column_config.NumberColumn("RS vs Nifty", format="%.2f%%"),
                     "Price":     st.column_config.NumberColumn("CMP ₹",   format="%.2f"),
+                    "Breakout (H1)": st.column_config.NumberColumn("Breakout (H1) ₹", format="%.2f"),
+                    "Higher Low (L2)": st.column_config.NumberColumn("Higher Low (L2) ₹", format="%.2f"),
+                    "Days Ago":  st.column_config.NumberColumn("Days Ago", format="%d"),
                     "EMA20":     st.column_config.NumberColumn("EMA20 ₹", format="%.2f"),
                     "Daily RSI": st.column_config.NumberColumn("RSI",     format="%.1f"),
                     "Rel Vol":   st.column_config.NumberColumn("Rel Vol", format="%.2f"),
@@ -505,4 +553,86 @@ with tab_hammer:
             settings=settings,
             grid_cols=HAMMER_COLS,
             tab_label="Hammer Reversal",
+        )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TAB 4 — DOW THEORY UPTREND SCANNER
+# ════════════════════════════════════════════════════════════════════════════
+with tab_dow:
+    col_hdr4, col_btn4 = st.columns([5, 1])
+    with col_hdr4:
+        st.markdown(
+            "**🏛️ Dow Theory Uptrend** — Stocks transitioning into an uptrend NOW. "
+            "Confirmed Higher Low (HL) + fresh breakout above prior Swing High (HH)."
+        )
+    with col_btn4:
+        dow_btn = st.button("🔄 Run Scan", type="primary", use_container_width=True, key="dow_run")
+
+    with st.expander("ℹ️ How the Dow Theory Uptrend scanner works", expanded=False):
+        st.markdown("""
+### Dow Theory Trend Change (Uptrend Initiation)
+
+According to classical **Dow Theory**, an uptrend is defined by a succession of **Higher Highs (HH)** and **Higher Lows (HL)**. When a stock reverses from a downtrend or basing phase into an uptrend, it follows a 4-step sequence:
+
+| Step | Dow Principle | Technical Implementation |
+|---|---|---|
+| **1. Base Low ($L_1$)** | Prior Trough | The initial swing low or base trough established prior to the rally. |
+| **2. Swing High ($H_1$)** | Reference Peak | Rally establishes reference resistance ($H_1$), defining the level to beat. |
+| **3. Higher Low ($L_2$)** | Uptrend Base | Pullback stops strictly above $L_1$ ($L_2 > L_1$). Downtrend sellers fail to make a new low! |
+| **4. Breakout ($HH$)** | **Entering Uptrend NOW** | Price rallies from $L_2$ and breaks above $H_1$ within the last 1–3 sessions. |
+| **5. Volume** | Trend Confirmation | Charles Dow: *"Volume must expand with the trend"*. High RelVol on breakout leg. |
+
+---
+
+### Risk Management & Sizing
+- **Stop Loss**: Placed strictly below the **Higher Low ($L_2$)**. If price falls below $L_2$, the higher-low structure is broken and the uptrend hypothesis is invalidated.
+- **Target 1**: Entry + $2 \\times \\text{Risk}$ (2R).
+- **Target 2**: Entry + $3 \\times \\text{Risk}$ (3R).
+- **Freshness Filter**: Only stocks within $0\\%$ to $5.5\\%$ of the breakout level are selected so the entry is immediate and actionable.
+        """)
+
+    if dow_btn:
+        prog4 = st.progress(0)
+        stat4 = st.empty()
+
+        def _prog_dow(done, total):
+            pct = done / total
+            prog4.progress(pct)
+            stat4.caption(f"Scanning {done}/{total} stocks… ({int(pct*100)}%)")
+
+        with st.spinner(""):
+            result4 = run_dow_scan(
+                target_tickers, capital, risk_pct, min_relvol, _prog_dow
+            )
+
+        prog4.empty(); stat4.empty()
+
+        if result4.empty:
+            st.warning("No Dow Theory uptrend setups found in this universe right now.")
+        else:
+            st.session_state["scan_dow"] = result4
+            st.session_state["scan_dow_universe"] = f"{universe_choice} ({len(target_tickers)})"
+            buys_found = len(result4[result4["Signal"] == "BUY"])
+            st.toast(f"✅ Dow Theory scan — {buys_found} BUY setups found", icon="🏛️")
+
+    if "scan_dow" not in st.session_state:
+        st.info("👆 Click **Run Scan** to find stocks entering into an uptrend using Dow Theory.")
+    else:
+        st.caption(f"Universe: {st.session_state.get('scan_dow_universe', '')}")
+        DOW_COLS = [
+            "Symbol", "Setup", "Score", "RS vs Nifty", "Price",
+            "Breakout (H1)", "Higher Low (L2)", "Days Ago",
+            "Entry", "Stop", "Target 1", "Target 2",
+            "Daily RSI", "Rel Vol", "Qty", "Risk ₹",
+        ]
+        _render_results(
+            out=st.session_state["scan_dow"],
+            scan_key="dow",
+            capital=capital,
+            risk_pct=risk_pct,
+            settings=settings,
+            grid_cols=DOW_COLS,
+            tab_label="Dow Uptrend",
+            show_dow_chart=True,
         )

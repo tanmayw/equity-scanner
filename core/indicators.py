@@ -522,10 +522,223 @@ def hammer_downtrend_signal(
         "Target 1":         round(target1, 2),
         "Target 2":         round(target2, 2),
         "Qty":              qty,
-        "Risk \u20b9":           round(qty * risk_per_share, 2),
+        "Risk ₹":           round(qty * risk_per_share, 2),
         "Score":            score,
         "Signal":           "BUY" if score >= 55 else "WATCH",
     }
+
+
+# ---------------------------------------------------------------------------
+# Dow Theory Pivots & Uptrend Signal
+# ---------------------------------------------------------------------------
+
+def find_dow_pivots(
+    df: pd.DataFrame, left: int = 3, right: int = 2
+) -> tuple[list[tuple[int, any, float]], list[tuple[int, any, float]]]:
+    """
+    Detect local swing highs and swing lows (fractal pivots) using asymmetric lookback/lookahead.
+    Returns:
+        swing_highs: list of (bar_index, date, high_price)
+        swing_lows:  list of (bar_index, date, low_price)
+    """
+    if len(df) < (left + right + 1):
+        return [], []
+    high = df["High"].values
+    low = df["Low"].values
+    n = len(df)
+    sh: list[tuple[int, any, float]] = []
+    sl: list[tuple[int, any, float]] = []
+
+    for i in range(left, n - right):
+        if high[i] >= np.max(high[i - left : i]) and high[i] >= np.max(high[i + 1 : i + 1 + right]):
+            if not sh or (i - sh[-1][0] >= 3):
+                sh.append((i, df.index[i], float(high[i])))
+
+        if low[i] <= np.min(low[i - left : i]) and low[i] <= np.min(low[i + 1 : i + 1 + right]):
+            if not sl or (i - sl[-1][0] >= 3):
+                sl.append((i, df.index[i], float(low[i])))
+
+    return sh, sl
+
+
+def dow_theory_uptrend_signal(
+    ticker: str,
+    df: pd.DataFrame,
+    capital: float,
+    risk_pct: float,
+    min_relvol: float,
+    bench_series: pd.Series | None = None,
+) -> dict | None:
+    """
+    Detect stocks entering into an uptrend NOW using classical Dow Theory.
+
+    Dow Theory Uptrend Transition Criteria
+    --------------------------------------
+    1. Structure:
+       - Base Low (L1): Previous swing low trough.
+       - Swing High (H1): Reference resistance peak formed 3 to 45 bars ago.
+       - Higher Low (L2): Pullback low formed AFTER H1, holding strictly above L1 (L2 > L1).
+    2. Fresh Breakout (Entering Uptrend Now):
+       - Price crosses or closes above H1 within the last 1–3 trading sessions.
+       - Price is currently trading at or slightly above H1 (within -1% to +5.5% of H1, not overextended).
+       - Higher Low (L2) has remained unbroken.
+    3. Volume Confirmation (Dow Principle):
+       - Expanding volume on breakout candle (RelVol >= 1.0 or >= min_relvol).
+    4. Trend Confluence:
+       - Close > EMA20, RSI in healthy momentum recovery (48–70).
+       - Higher timeframe (Weekly) trend support.
+
+    Stop   -> Just below Higher Low L2 (invalidation of Dow Higher-Low structure).
+    Target -> 2R (Target 1) and 3R (Target 2).
+    """
+    if df.empty or len(df) < 60:
+        return None
+
+    d = add_indicators(df)
+    if d.empty or len(d) < 30:
+        return None
+
+    sh, sl = find_dow_pivots(d, left=3, right=2)
+    if len(sh) < 2 or len(sl) < 2:
+        return None
+
+    n = len(d)
+    last = d.iloc[-1]
+    last_close = float(last["Close"])
+
+    wk_ok, wk = weekly_filter(df)
+    rs_val, rs_ok = calc_relative_strength(d["Close"], bench_series)
+
+    for h_idx, h_date, h_val in reversed(sh):
+        bars_since_h = (n - 1) - h_idx
+        if bars_since_h < 2 or bars_since_h > 45:
+            continue
+
+        l2_cands = [s for s in sl if s[0] > h_idx and s[0] <= n - 2]
+        if not l2_cands:
+            continue
+        l2_idx, l2_date, l2_val = l2_cands[-1]
+
+        l1_cands = [s for s in sl if s[0] < h_idx and s[0] >= h_idx - 40]
+        if not l1_cands:
+            continue
+        l1_idx, l1_date, l1_val = l1_cands[-1]
+
+        # Dow Condition 1: Higher Low must be established (L2 > L1)
+        if l2_val <= l1_val * 1.002:
+            continue
+
+        # Dow Condition 2: Breakout above H1 in recent 1-3 bars
+        breakout_bar = None
+        for b_offset in range(1, 4):
+            b_idx = n - b_offset
+            if d["Close"].iloc[b_idx] >= h_val:
+                if b_idx > 0 and (d["Close"].iloc[b_idx - 1] <= h_val * 1.005 or d["High"].iloc[b_idx - 1] <= h_val):
+                    breakout_bar = b_offset - 1
+                    break
+
+        if breakout_bar is None:
+            if last_close >= h_val and d["Close"].iloc[-2] <= h_val:
+                breakout_bar = 0
+            elif last_close >= h_val and (last_close - h_val) / h_val <= 0.045:
+                if min(d["Low"].iloc[h_idx + 1 :]) < h_val:
+                    bars_above = 0
+                    for k in range(n - 1, h_idx, -1):
+                        if d["Close"].iloc[k] >= h_val * 0.992:
+                            bars_above += 1
+                        else:
+                            break
+                    if 1 <= bars_above <= 3:
+                        breakout_bar = bars_above - 1
+
+        if breakout_bar is None:
+            continue
+
+        pct_above = ((last_close - h_val) / h_val) * 100
+        if pct_above > 5.5 or pct_above < -1.0:
+            continue
+
+        # Structural Invalidation Stop below Higher Low L2
+        raw_stop = float(l2_val * 0.995)
+        atrv = float(last["ATR14"]) if pd.notna(last["ATR14"]) else last_close * 0.02
+        stop = min(raw_stop, last_close - atrv)
+        if stop >= last_close:
+            stop = last_close - max(atrv, last_close * 0.02)
+
+        risk_per_share = max(last_close - stop, 0.01)
+        risk_budget = capital * risk_pct / 100
+        qty = max(0, int(risk_budget / risk_per_share))
+        target1 = last_close + 2 * risk_per_share
+        target2 = last_close + 3 * risk_per_share
+
+        # ── Scoring ───────────────────────────────────────────────────────────
+        score = 30
+        if breakout_bar == 0:
+            score += 20
+        elif breakout_bar == 1:
+            score += 15
+        else:
+            score += 10
+
+        if pct_above <= 2.5:
+            score += 10
+
+        rsi_val = float(last["RSI14"]) if pd.notna(last["RSI14"]) else 50.0
+        if 50.0 <= rsi_val <= 68.0:
+            score += 15
+        elif 45.0 <= rsi_val < 50.0:
+            score += 10
+
+        relvol = float(last["RelVol"]) if pd.notna(last["RelVol"]) else 1.0
+        if relvol >= min_relvol:
+            score += 15
+        elif relvol >= 1.0:
+            score += 10
+
+        if last_close > last["EMA20"] > last["EMA50"]:
+            score += 10
+        elif last_close > last["EMA20"]:
+            score += 5
+
+        if wk_ok:
+            score += 10
+        if rs_ok:
+            score += 5
+
+        setup_name = (
+            "Dow Breakout (Today)" if breakout_bar == 0 else f"Dow Breakout ({breakout_bar}d ago)"
+        )
+
+        return {
+            "Symbol": ticker.replace(".NS", "").replace(".BO", ""),
+            "Setup": setup_name,
+            "Price": round(last_close, 2),
+            "Breakout (H1)": round(h_val, 2),
+            "Higher Low (L2)": round(l2_val, 2),
+            "Base Low (L1)": round(l1_val, 2),
+            "Pct Above Breakout": round(pct_above, 2),
+            "Days Ago": breakout_bar,
+            "EMA20": round(float(last["EMA20"]), 2),
+            "EMA50": round(float(last["EMA50"]), 2),
+            "Daily RSI": round(rsi_val, 1),
+            "Weekly RSI": round(wk.get("Weekly RSI", np.nan), 1),
+            "Rel Vol": round(relvol, 2),
+            "RS vs Nifty": rs_val,
+            "RS Outperforming": rs_ok,
+            "Entry": round(last_close, 2),
+            "Stop": round(stop, 2),
+            "Target 1": round(target1, 2),
+            "Target 2": round(target2, 2),
+            "Qty": qty,
+            "Risk ₹": round(qty * risk_per_share, 2),
+            "Score": min(100, score),
+            "Signal": "BUY" if score >= 70 else "WATCH",
+            "H1_Date": str(h_date)[:10],
+            "L2_Date": str(l2_date)[:10],
+            "L1_Date": str(l1_date)[:10],
+        }
+
+    return None
 
 
 # ---------------------------------------------------------------------------

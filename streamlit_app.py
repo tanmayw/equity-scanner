@@ -87,7 +87,7 @@ c1, c2, c3, c4, c5, c6 = st.columns(6)
 paper_desc = f"Track simulated trades · {n_open_trades} Open" if n_open_trades > 0 else "Track simulated trades & monthly performance"
 
 nav_cards = [
-    ("📊", "Scanner", "Scan Nifty universes for breakout & momentum setups", "pages/1_Scanner.py", "/Scanner"),
+    ("📊", "Scanner", "Scan Nifty universes for breakout, pullback & Dow Theory setups", "pages/1_Scanner.py", "/Scanner"),
     ("🎯", "Trade Planner", "Calculate position size, R:R, and order details", "pages/2_Trade_Planner.py", "/Trade_Planner"),
     ("📋", "Paper Trading", paper_desc, "pages/3_Paper_Trading.py", "/Paper_Trading"),
     ("🧪", "Backtest", "Test strategy on historical data with real costs", "pages/4_Backtest.py", "/Backtest"),
